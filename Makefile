@@ -3,25 +3,17 @@
 # Version of calico/build to use.
 BUILD_VERSION=latest
 
-SRCFILES=$(shell find calico_cni -type f ! -path calico_cni/version.py) calico.py ipam.py
+SRCFILES=$(shell find calico_cni -type f ! -path calico_cni/version.py) ipam.py
 LOCAL_IP_ENV?=$(shell ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
 
-K8S_VERSION=1.2.0
+K8S_VERSION=1.2.3
 
 default: all
 all: binary test
 binary: update-version dist/calico dist/calico-ipam
-test: ut fv
+test: ut
 plugin: dist/calico
 ipam: dist/calico-ipam
-
-
-# Builds the Calico CNI plugin binary.
-dist/calico: $(SRCFILES) 
-	docker run  --rm \
-	-v `pwd`:/code \
-	calico/build:$(BUILD_VERSION) \
-	pyinstaller calico.py -ayF
 
 # Makes the IPAM plugin.
 dist/calico-ipam: $(SRCFILES) 
@@ -39,7 +31,7 @@ update-version:
 	echo "__branch__ = '$(shell git rev-parse --abbrev-ref HEAD)'" >> calico_cni/version.py
 
 # Copy the plugin into place
-deploy-rkt: dist/calicoctl
+deploy-rkt: dist/calico
 	cp dist/calico /etc/rkt/net.d
 
 # Run the unit tests.
@@ -47,12 +39,6 @@ ut: update-version
 	docker run --rm -v `pwd`:/code \
 	calico/test \
 	nosetests tests/unit -c nose.cfg
-
-# Run the fv tests.
-fv: update-version
-	docker run --rm -v `pwd`:/code \
-	calico/test \
-	nosetests tests/fv -c nose.cfg
 
 # Makes tests on Circle CI.
 test-circle: update-version dist/calico dist/calico-ipam
@@ -85,7 +71,7 @@ run-etcd:
 
 run-kubernetes-master: stop-kubernetes-master run-etcd  kubectl # binary dist/calicoctl
 	mkdir -p net.d
-	echo '{"name": "calico-k8s-network","type": "calico","etcd_authority": "10.0.2.15:2379","log_level": "debug","policy": {"type": "default-deny-inbound","k8s_api_root": "http://127.0.0.1:8080/api/v1/"},"ipam": {"type": "calico-ipam"}}' >net.d/10-calico.conf
+	echo '{"name": "calico-k8s-network","type": "caligo","etcd_authority": "10.0.2.15:2379","log_level": "debug","policy": {"type": "k8s","k8s_api_root": "http://127.0.0.1:8080/api/v1/"},"ipam": {"type": "host-local", "subnet": "10.0.0.0/8"}}' >net.d/10-calico.conf
 	# Run the kubelet which will launch the master components in a pod.
 	docker run \
 		--volume=/:/rootfs:ro \
@@ -136,3 +122,13 @@ dist/calicoctl:
 	sudo chmod a+w dist
 	curl -o dist/calicoctl -L https://github.com/projectcalico/calico-containers/releases/download/v0.17.0/calicoctl
 	chmod +x dist/calicoctl
+
+glide:
+	go get github.com/Masterminds/glide
+	ln -s $$GOPATH/bin/glide glide
+
+vendor: glide
+	./glide up -s -v
+
+dist/calico: vendor $(shell find vendor -type f) calico.go
+	go build -v -o dist/caligo calico.go

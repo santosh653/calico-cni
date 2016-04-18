@@ -1,3 +1,4 @@
+vendor
 build
 dist
 venv
@@ -9,3 +10,6 @@ env
 .coverage
 *.spec
 calico_cni/version.py
+glide
+kubectl
+net.d

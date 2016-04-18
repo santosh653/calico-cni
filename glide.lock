@@ -1,0 +1,46 @@
+hash: 636c8497ab618c911604f26bdc66e68324f98d14f48407fd8b5c7eaa0f0a59cf
+updated: 2016-04-21T17:22:18.463552195-07:00
+imports:
+- name: github.com/appc/cni
+  version: 8bb41b9d6f5029dd7bbdb17045d561736f9fb61a
+  subpackages:
+  - pkg/ip
+  - pkg/ipam
+  - pkg/ns
+  - pkg/skel
+  - pkg/types
+  - pkg/invoke
+- name: github.com/coreos/etcd
+  version: d32113a0e53f6bc44e4a20afb57bcbdb472a9002
+  subpackages:
+  - client
+  - pkg/pathutil
+  - pkg/types
+- name: github.com/coreos/go-iptables
+  version: fbb73372b87f6e89951c2b6b31470c2c9d5cfae3
+  subpackages:
+  - iptables
+- name: github.com/projectcalico/libcalico
+  version: 2cf35746caafbb0767cfccccc4695b10b1be4c10
+  repo: git@github.com:tomdee/libcalico.git
+  vcs: git
+  subpackages:
+  - pkg
+  - pkg/endpoint
+  - pkg/profile
+  - pkg/workload
+- name: github.com/satori/go.uuid
+  version: f9ab0dce87d815821e221626b772e3475a0d2749
+- name: github.com/ugorji/go
+  version: a396ed22fc049df733440d90efe17475e3929ccb
+  subpackages:
+  - codec
+- name: github.com/vishvananda/netlink
+  version: ecf47fd5739b3d2c3daf7c89c4b9715a2605c21b
+  subpackages:
+  - nl
+- name: golang.org/x/net
+  version: 815d315ead425c4365077d904a2331ee9e179820
+  subpackages:
+  - context
+devImports: []
