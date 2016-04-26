@@ -71,7 +71,7 @@ run-etcd:
 
 run-kubernetes-master: stop-kubernetes-master run-etcd  kubectl # binary dist/calicoctl
 	mkdir -p net.d
-	echo '{"name": "calico-k8s-network","type": "caligo","etcd_authority": "10.0.2.15:2379","log_level": "debug","policy": {"type": "k8s","k8s_api_root": "http://127.0.0.1:8080/api/v1/"},"ipam": {"type": "host-local", "subnet": "10.0.0.0/8"}}' >net.d/10-calico.conf
+	echo '{"name": "calico-k8s-network","type": "calico","etcd_authority": "10.0.2.15:2379","log_level": "debug","policy": {"type": "k8s","k8s_api_root": "http://127.0.0.1:8080/api/v1/"},"ipam": {"type": "host-local", "subnet": "10.0.0.0/8"}}' >net.d/10-calico.conf
 	# Run the kubelet which will launch the master components in a pod.
 	docker run \
 		--volume=/:/rootfs:ro \

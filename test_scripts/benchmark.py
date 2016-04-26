@@ -19,7 +19,7 @@ def test():
            "CNI_CONTAINERID": container_id,
            "CNI_NETNS": netnspath,
            "CNI_IFNAME": "eth0",
-           "CNI_PATH": "/home/gulfstream/go/src/github.com/appc/cni/bin/"})
+           "CNI_PATH": "/home/tom/go/src/github.com/appc/cni/bin/"})
 
     plugin = ""
     with open(sys.argv[1], 'r') as f:
@@ -27,17 +27,17 @@ def test():
         plugin = data["type"]
     with open(sys.argv[1], 'r') as f:
         check_call("command time -o addstats -a -f '%e,%S,%U,%M,%t,%K,%I,%O' " + plugin, stdin=f, env=os.environ, shell=True)
-    check_call("ip netns exec %s ifconfig eth0" % container_id, shell=True)
+#    check_call("ip netns exec %s ifconfig eth0" % container_id, shell=True)
     check_call("ip netns exec %s ip route" % container_id, shell=True)
-    check_call("ifconfig cali%s || true" % container_id, shell=True)
-    check_call("etcdctl ls /calico/v1/host/gulfstream/workload/cni/%s --recursive |tail -1 | xargs etcdctl get" % container_id, shell=True)
+#    check_call("ifconfig cali%s || true" % container_id, shell=True)
+#    check_call("etcdctl ls /calico/v1/host/gulfstream/workload/cni/%s --recursive |tail -1 | xargs etcdctl get" % container_id, shell=True)
     os.environ["CNI_COMMAND"] = "DEL"
     with open(sys.argv[1], 'r') as f:
         check_call("command time -o delstats -a -f '%e,%S,%U,%M,%t,%K,%I,%O' " + plugin, stdin=f, env=os.environ, shell=True)
     check_call("ip netns delete %s" % container_id, shell=True)
 
 
-reps = 2
+reps = 10
 
 check_call("rm -f addstats delstats", shell=True)
 for i in range(0, reps):
