@@ -1,0 +1,12 @@
+build
+dist
+venv
+env
+.idea
+*.pyc
+*~
+.coverage
+cover
+calicobuild.created
+caliconode.created
+calico_containers/pycalico.egg-info/
