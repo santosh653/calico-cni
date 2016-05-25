@@ -130,5 +130,18 @@ glide:
 vendor: glide
 	./glide up -s -v
 
-dist/calico: vendor $(shell find vendor -type f) calico.go
-	go build -v -o dist/caligo calico.go
+dist/calico: $(shell find vendor -type f) flannel_build.created calico.go
+	mkdir -p dist
+	docker run --rm \
+	-v ${PWD}/dist:/mnt/artifacts \
+	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
+	flannel_build bash -c '\
+		go build -o /mnt/artifacts/calico -ldflags "-extldflags -static \
+		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --dirty)" calico.go; \
+		chown -R $(shell id -u):$(shell id -u) /mnt/artifacts'
+#	go build -v -o dist/caligo calico.go
+
+flannel_build.created: Dockerfile
+	docker build -t flannel_build .
+	touch flannel_build.created
+
