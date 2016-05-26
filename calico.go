@@ -187,7 +187,7 @@ func getK8sLabels(conf NetConf, k8sargs K8sArgs) (map[string]string, error) {
 
 	var dat map[string]interface{}
 	if err := json.Unmarshal(body, &dat); err != nil {
-		return nil,err
+		return nil, err
 	}
 
 	metadata := dat["metadata"].(map[string]interface{})
@@ -214,7 +214,7 @@ func validateNetworkName(name string) error {
 	}
 	if ! matched {
 		return errors.New("Invalid characters detected in the given network name. " +
-			"Only letters a-z, numbers 0-9, and symbols _.- are supported.")
+		"Only letters a-z, numbers 0-9, and symbols _.- are supported.")
 	}
 	return nil
 }
@@ -260,11 +260,13 @@ func cmdAdd(args *skel.CmdArgs) error {
 		orchestratorId = "cni"
 		labels = map[string]string{}
 		profileID = conf.Name
+
 		// Create the profile if needed - name = network_name
 		exists, err := profile.ProfileExists(conf.Name, etcd)
 		if err != nil {
 			return err
 		}
+
 		if ! exists {
 			profile := profile.Profile{
 				ID:conf.Name,
@@ -287,6 +289,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
+
 	if found {
 		// There's an existing endpoint
 		theendpoint.ProfileID = append(theendpoint.ProfileID, profileID)

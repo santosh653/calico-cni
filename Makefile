@@ -4,7 +4,8 @@
 BUILD_VERSION=latest
 
 SRCFILES=$(shell find calico_cni -type f ! -path calico_cni/version.py) ipam.py
-LOCAL_IP_ENV?=$(shell ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
+LOCAL_IP_ENV?=$(shell docker-machine ip)
+#ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
 
 K8S_VERSION=1.2.3
 
@@ -145,3 +146,13 @@ flannel_build.created: Dockerfile
 	docker build -t flannel_build .
 	touch flannel_build.created
 
+go_test: dist/calico dist/host-local
+	docker run -ti --rm --privileged \
+	-e ETCD_IP=$(LOCAL_IP_ENV) \
+	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
+	flannel_build bash -c '\
+		go test -v github.com/projectcalico/calico-cni/tests'
+
+dist/host-local:
+	mkdir -p dist
+	curl -L https://github.com/containernetworking/cni/releases/download/v0.2.2/cni-v0.2.2.tgz | tar -zxv -C dist
