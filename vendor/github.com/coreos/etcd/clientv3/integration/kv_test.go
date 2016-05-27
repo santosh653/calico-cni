@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,16 +17,53 @@ package integration
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/coreos/etcd/clientv3"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	"github.com/coreos/etcd/integration"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/coreos/etcd/pkg/testutil"
-	"github.com/coreos/etcd/storage/storagepb"
 	"golang.org/x/net/context"
 )
+
+func TestKVPutError(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	var (
+		maxReqBytes = 1.5 * 1024 * 1024
+		quota       = int64(maxReqBytes * 1.2)
+	)
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 1, QuotaBackendBytes: quota})
+	defer clus.Terminate(t)
+
+	kv := clientv3.NewKV(clus.RandClient())
+	ctx := context.TODO()
+
+	_, err := kv.Put(ctx, "", "bar")
+	if err != rpctypes.ErrEmptyKey {
+		t.Fatalf("expected %v, got %v", rpctypes.ErrEmptyKey, err)
+	}
+
+	_, err = kv.Put(ctx, "key", strings.Repeat("a", int(maxReqBytes+100))) // 1.5MB
+	if err != rpctypes.ErrRequestTooLarge {
+		t.Fatalf("expected %v, got %v", rpctypes.ErrRequestTooLarge, err)
+	}
+
+	_, err = kv.Put(ctx, "foo1", strings.Repeat("a", int(maxReqBytes-50)))
+	if err != nil { // below quota
+		t.Fatal(err)
+	}
+
+	time.Sleep(500 * time.Millisecond) // give enough time for commit
+
+	_, err = kv.Put(ctx, "foo2", strings.Repeat("a", int(maxReqBytes-50)))
+	if err != rpctypes.ErrNoSpace { // over quota
+		t.Fatalf("expected %v, got %v", rpctypes.ErrNoSpace, err)
+	}
+}
 
 func TestKVPut(t *testing.T) {
 	defer testutil.AfterTest(t)
@@ -73,6 +110,29 @@ func TestKVPut(t *testing.T) {
 	}
 }
 
+func TestKVPutWithRequireLeader(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 3})
+	defer clus.Terminate(t)
+
+	clus.Members[1].Stop(t)
+	clus.Members[2].Stop(t)
+
+	// wait for election timeout, then member[0] will not have a leader.
+	var (
+		electionTicks = 10
+		tickDuration  = 10 * time.Millisecond
+	)
+	time.Sleep(time.Duration(3*electionTicks) * tickDuration)
+
+	kv := clientv3.NewKV(clus.Client(0))
+	_, err := kv.Put(clientv3.WithRequireLeader(context.Background()), "foo", "bar")
+	if err != rpctypes.ErrNoLeader {
+		t.Fatal(err)
+	}
+}
+
 func TestKVRange(t *testing.T) {
 	defer testutil.AfterTest(t)
 
@@ -99,7 +159,7 @@ func TestKVRange(t *testing.T) {
 		rev        int64
 		opts       []clientv3.OpOption
 
-		wantSet []*storagepb.KeyValue
+		wantSet []*mvccpb.KeyValue
 	}{
 		// range first two
 		{
@@ -107,7 +167,7 @@ func TestKVRange(t *testing.T) {
 			0,
 			nil,
 
-			[]*storagepb.KeyValue{
+			[]*mvccpb.KeyValue{
 				{Key: []byte("a"), Value: nil, CreateRevision: 2, ModRevision: 2, Version: 1},
 				{Key: []byte("b"), Value: nil, CreateRevision: 3, ModRevision: 3, Version: 1},
 			},
@@ -118,7 +178,7 @@ func TestKVRange(t *testing.T) {
 			0,
 			[]clientv3.OpOption{clientv3.WithSerializable()},
 
-			[]*storagepb.KeyValue{
+			[]*mvccpb.KeyValue{
 				{Key: []byte("a"), Value: nil, CreateRevision: 2, ModRevision: 2, Version: 1},
 				{Key: []byte("b"), Value: nil, CreateRevision: 3, ModRevision: 3, Version: 1},
 			},
@@ -129,7 +189,7 @@ func TestKVRange(t *testing.T) {
 			2,
 			nil,
 
-			[]*storagepb.KeyValue{
+			[]*mvccpb.KeyValue{
 				{Key: []byte("a"), Value: nil, CreateRevision: 2, ModRevision: 2, Version: 1},
 			},
 		},
@@ -139,7 +199,7 @@ func TestKVRange(t *testing.T) {
 			0,
 			[]clientv3.OpOption{clientv3.WithSort(clientv3.SortByKey, clientv3.SortAscend)},
 
-			[]*storagepb.KeyValue{
+			[]*mvccpb.KeyValue{
 				{Key: []byte("a"), Value: nil, CreateRevision: 2, ModRevision: 2, Version: 1},
 				{Key: []byte("b"), Value: nil, CreateRevision: 3, ModRevision: 3, Version: 1},
 				{Key: []byte("c"), Value: nil, CreateRevision: 4, ModRevision: 6, Version: 3},
@@ -154,7 +214,7 @@ func TestKVRange(t *testing.T) {
 			0,
 			[]clientv3.OpOption{clientv3.WithSort(clientv3.SortByCreateRevision, clientv3.SortDescend)},
 
-			[]*storagepb.KeyValue{
+			[]*mvccpb.KeyValue{
 				{Key: []byte("fop"), Value: nil, CreateRevision: 9, ModRevision: 9, Version: 1},
 				{Key: []byte("foo/abc"), Value: nil, CreateRevision: 8, ModRevision: 8, Version: 1},
 				{Key: []byte("foo"), Value: nil, CreateRevision: 7, ModRevision: 7, Version: 1},
@@ -169,7 +229,7 @@ func TestKVRange(t *testing.T) {
 			0,
 			[]clientv3.OpOption{clientv3.WithSort(clientv3.SortByModRevision, clientv3.SortDescend)},
 
-			[]*storagepb.KeyValue{
+			[]*mvccpb.KeyValue{
 				{Key: []byte("fop"), Value: nil, CreateRevision: 9, ModRevision: 9, Version: 1},
 				{Key: []byte("foo/abc"), Value: nil, CreateRevision: 8, ModRevision: 8, Version: 1},
 				{Key: []byte("foo"), Value: nil, CreateRevision: 7, ModRevision: 7, Version: 1},
@@ -184,7 +244,7 @@ func TestKVRange(t *testing.T) {
 			0,
 			[]clientv3.OpOption{clientv3.WithPrefix()},
 
-			[]*storagepb.KeyValue{
+			[]*mvccpb.KeyValue{
 				{Key: []byte("foo"), Value: nil, CreateRevision: 7, ModRevision: 7, Version: 1},
 				{Key: []byte("foo/abc"), Value: nil, CreateRevision: 8, ModRevision: 8, Version: 1},
 			},
@@ -195,7 +255,7 @@ func TestKVRange(t *testing.T) {
 			0,
 			[]clientv3.OpOption{clientv3.WithFromKey()},
 
-			[]*storagepb.KeyValue{
+			[]*mvccpb.KeyValue{
 				{Key: []byte("foo"), Value: nil, CreateRevision: 7, ModRevision: 7, Version: 1},
 				{Key: []byte("foo/abc"), Value: nil, CreateRevision: 8, ModRevision: 8, Version: 1},
 				{Key: []byte("fop"), Value: nil, CreateRevision: 9, ModRevision: 9, Version: 1},
@@ -323,6 +383,36 @@ func TestKVDelete(t *testing.T) {
 	}
 }
 
+func TestKVCompactError(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 1})
+	defer clus.Terminate(t)
+
+	kv := clientv3.NewKV(clus.RandClient())
+	ctx := context.TODO()
+
+	for i := 0; i < 5; i++ {
+		if _, err := kv.Put(ctx, "foo", "bar"); err != nil {
+			t.Fatalf("couldn't put 'foo' (%v)", err)
+		}
+	}
+	err := kv.Compact(ctx, 6)
+	if err != nil {
+		t.Fatalf("couldn't compact 6 (%v)", err)
+	}
+
+	err = kv.Compact(ctx, 6)
+	if err != rpctypes.ErrCompacted {
+		t.Fatalf("expected %v, got %v", rpctypes.ErrCompacted, err)
+	}
+
+	err = kv.Compact(ctx, 100)
+	if err != rpctypes.ErrFutureRev {
+		t.Fatalf("expected %v, got %v", rpctypes.ErrFutureRev, err)
+	}
+}
+
 func TestKVCompact(t *testing.T) {
 	defer testutil.AfterTest(t)
 
@@ -344,7 +434,7 @@ func TestKVCompact(t *testing.T) {
 	}
 	err = kv.Compact(ctx, 7)
 	if err == nil || err != rpctypes.ErrCompacted {
-		t.Fatalf("error got %v, want %v", err, rpctypes.ErrFutureRev)
+		t.Fatalf("error got %v, want %v", err, rpctypes.ErrCompacted)
 	}
 
 	wcli := clus.RandClient()
@@ -392,7 +482,7 @@ func TestKVGetRetry(t *testing.T) {
 		if gerr != nil {
 			t.Fatal(gerr)
 		}
-		wkvs := []*storagepb.KeyValue{
+		wkvs := []*mvccpb.KeyValue{
 			{
 				Key:            []byte("foo"),
 				Value:          []byte("bar"),
@@ -479,4 +569,20 @@ func TestKVGetCancel(t *testing.T) {
 	if oldconn != newconn {
 		t.Fatalf("cancel on get broke client connection")
 	}
+}
+
+// TestKVPutStoppedServerAndClose ensures closing after a failed Put works.
+func TestKVPutStoppedServerAndClose(t *testing.T) {
+	defer testutil.AfterTest(t)
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 1})
+	defer clus.Terminate(t)
+	clus.Members[0].Stop(t)
+	// this Put fails and triggers an asynchronous connection retry
+	_, err := clus.Client(0).Put(context.TODO(), "abc", "123")
+	if err == nil ||
+		(!strings.Contains(err.Error(), "connection is closing") &&
+			!strings.Contains(err.Error(), "transport is closing")) {
+		t.Fatal(err)
+	}
+	// cluster will terminate and close the client with the retry in-flight
 }

@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -129,10 +129,18 @@ func getGetOp(cmd *cobra.Command, args []string) (string, []clientv3.OpOption) {
 	opts = append(opts, clientv3.WithSort(sortByTarget, sortByOrder))
 
 	if getPrefix {
-		opts = append(opts, clientv3.WithPrefix())
+		if len(key) == 0 {
+			key = "\x00"
+			opts = append(opts, clientv3.WithFromKey())
+		} else {
+			opts = append(opts, clientv3.WithPrefix())
+		}
 	}
 
 	if getFromKey {
+		if len(key) == 0 {
+			key = "\x00"
+		}
 		opts = append(opts, clientv3.WithFromKey())
 	}
 

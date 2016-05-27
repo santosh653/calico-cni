@@ -1,8 +1,8 @@
-hash: 636c8497ab618c911604f26bdc66e68324f98d14f48407fd8b5c7eaa0f0a59cf
-updated: 2016-04-21T17:22:18.463552195-07:00
+hash: 83a339617ee937452586ab16e571114c9a7b1262e0e94fd6b20596372c6169b8
+updated: 2016-05-27T12:32:55.616963486-07:00
 imports:
-- name: github.com/appc/cni
-  version: 8bb41b9d6f5029dd7bbdb17045d561736f9fb61a
+- name: github.com/containernetworking/cni
+  version: ffff8ac2fd79a5a26690f13a76aadcd3ad431879
   subpackages:
   - pkg/ip
   - pkg/ipam
@@ -11,7 +11,7 @@ imports:
   - pkg/types
   - pkg/invoke
 - name: github.com/coreos/etcd
-  version: d32113a0e53f6bc44e4a20afb57bcbdb472a9002
+  version: d8f325dabf429c449e0beb8cde843d4a8f53211d
   subpackages:
   - client
   - pkg/pathutil
@@ -21,14 +21,11 @@ imports:
   subpackages:
   - iptables
 - name: github.com/projectcalico/libcalico
-  version: 2cf35746caafbb0767cfccccc4695b10b1be4c10
+  version: a0fe0e3fa29e8ea9cf6d0a4976f60c94c77db97c
   repo: git@github.com:tomdee/libcalico.git
   vcs: git
   subpackages:
-  - pkg
-  - pkg/endpoint
-  - pkg/profile
-  - pkg/workload
+  - lib
 - name: github.com/satori/go.uuid
   version: f9ab0dce87d815821e221626b772e3475a0d2749
 - name: github.com/ugorji/go
@@ -40,7 +37,11 @@ imports:
   subpackages:
   - nl
 - name: golang.org/x/net
-  version: 815d315ead425c4365077d904a2331ee9e179820
+  version: 30db96677b74e24b967e23f911eb3364fc61a011
   subpackages:
   - context
+- name: golang.org/x/sys
+  version: e11762ca30adc5b39fdbfd8c4250dabeb8e456d3
+  subpackages:
+  - unix
 devImports: []

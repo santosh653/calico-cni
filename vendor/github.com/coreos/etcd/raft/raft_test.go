@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -476,7 +476,23 @@ func TestDuelingCandidates(t *testing.T) {
 	nt.send(pb.Message{From: 1, To: 1, Type: pb.MsgHup})
 	nt.send(pb.Message{From: 3, To: 3, Type: pb.MsgHup})
 
+	// 1 becomes leader since it receives votes from 1 and 2
+	sm := nt.peers[1].(*raft)
+	if sm.state != StateLeader {
+		t.Errorf("state = %s, want %s", sm.state, StateLeader)
+	}
+
+	// 3 stays as candidate since it receives a vote from 3 and a rejection from 2
+	sm = nt.peers[3].(*raft)
+	if sm.state != StateCandidate {
+		t.Errorf("state = %s, want %s", sm.state, StateCandidate)
+	}
+
 	nt.recover()
+
+	// candidate 3 now increases its term and tries to vote again
+	// we expect it to disrupt the leader 1 since it has a higher term
+	// 3 will be follower again since both 1 and 2 rejects its vote request since 3 does not have a long enough log
 	nt.send(pb.Message{From: 3, To: 3, Type: pb.MsgHup})
 
 	wlog := &raftLog{
@@ -857,8 +873,8 @@ func TestHandleHeartbeat(t *testing.T) {
 		m       pb.Message
 		wCommit uint64
 	}{
-		{pb.Message{From: 2, To: 1, Type: pb.MsgApp, Term: 2, Commit: commit + 1}, commit + 1},
-		{pb.Message{From: 2, To: 1, Type: pb.MsgApp, Term: 2, Commit: commit - 1}, commit}, // do not decrease commit
+		{pb.Message{From: 2, To: 1, Type: pb.MsgHeartbeat, Term: 2, Commit: commit + 1}, commit + 1},
+		{pb.Message{From: 2, To: 1, Type: pb.MsgHeartbeat, Term: 2, Commit: commit - 1}, commit}, // do not decrease commit
 	}
 
 	for i, tt := range tests {
@@ -1779,6 +1795,13 @@ func TestRemoveNode(t *testing.T) {
 		t.Errorf("pendingConf = %v, want false", r.pendingConf)
 	}
 	w := []uint64{1}
+	if g := r.nodes(); !reflect.DeepEqual(g, w) {
+		t.Errorf("nodes = %v, want %v", g, w)
+	}
+
+	// remove all nodes from cluster
+	r.removeNode(1)
+	w = []uint64{}
 	if g := r.nodes(); !reflect.DeepEqual(g, w) {
 		t.Errorf("nodes = %v, want %v", g, w)
 	}

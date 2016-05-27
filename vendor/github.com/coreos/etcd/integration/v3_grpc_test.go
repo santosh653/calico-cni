@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ package integration
 
 import (
 	"fmt"
+	"math/rand"
 	"reflect"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"github.com/coreos/etcd/pkg/testutil"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 // TestV3PutOverwrite puts a key with the v3 api to a random cluster member,
@@ -71,6 +73,38 @@ func TestV3PutOverwrite(t *testing.T) {
 	}
 	if !reflect.DeepEqual(reqput.Value, kv.Value) {
 		t.Errorf("expected value %v, got %v", reqput.Value, kv.Value)
+	}
+}
+
+// TestPutRestart checks if a put after an unrelated member restart succeeds
+func TestV3PutRestart(t *testing.T) {
+	defer testutil.AfterTest(t)
+	clus := NewClusterV3(t, &ClusterConfig{Size: 3})
+	defer clus.Terminate(t)
+
+	kvIdx := rand.Intn(3)
+	kvc := toGRPC(clus.Client(kvIdx)).KV
+
+	stopIdx := kvIdx
+	for stopIdx == kvIdx {
+		stopIdx = rand.Intn(3)
+	}
+
+	clus.clients[stopIdx].Close()
+	clus.Members[stopIdx].Stop(t)
+	clus.Members[stopIdx].Restart(t)
+	c, cerr := NewClientV3(clus.Members[stopIdx])
+	if cerr != nil {
+		t.Fatalf("cannot create client: %v", cerr)
+	}
+	clus.clients[stopIdx] = c
+
+	ctx, cancel := context.WithTimeout(context.TODO(), 10*time.Second)
+	defer cancel()
+	reqput := &pb.PutRequest{Key: []byte("foo"), Value: []byte("bar")}
+	_, err := kvc.Put(ctx, reqput)
+	if err != nil && err == ctx.Err() {
+		t.Fatalf("expected grpc error, got local ctx error (%v)", err)
 	}
 }
 
@@ -157,8 +191,8 @@ func TestV3TxnTooManyOps(t *testing.T) {
 		}
 
 		_, err := kvc.Txn(context.Background(), txn)
-		if err != rpctypes.ErrTooManyOps {
-			t.Errorf("#%d: err = %v, want %v", i, err, rpctypes.ErrTooManyOps)
+		if err != rpctypes.ErrGRPCTooManyOps {
+			t.Errorf("#%d: err = %v, want %v", i, err, rpctypes.ErrGRPCTooManyOps)
 		}
 	}
 }
@@ -197,17 +231,17 @@ func TestV3TxnDuplicateKeys(t *testing.T) {
 		{
 			txnSuccess: []*pb.RequestUnion{putreq, putreq},
 
-			werr: rpctypes.ErrDuplicateKey,
+			werr: rpctypes.ErrGRPCDuplicateKey,
 		},
 		{
 			txnSuccess: []*pb.RequestUnion{putreq, delKeyReq},
 
-			werr: rpctypes.ErrDuplicateKey,
+			werr: rpctypes.ErrGRPCDuplicateKey,
 		},
 		{
 			txnSuccess: []*pb.RequestUnion{putreq, delInRangeReq},
 
-			werr: rpctypes.ErrDuplicateKey,
+			werr: rpctypes.ErrGRPCDuplicateKey,
 		},
 		{
 			txnSuccess: []*pb.RequestUnion{delKeyReq, delInRangeReq, delKeyReq, delInRangeReq},
@@ -466,15 +500,15 @@ func TestV3TxnInvaildRange(t *testing.T) {
 		Request: &pb.RequestUnion_RequestRange{
 			RequestRange: rreq}})
 
-	if _, err := kvc.Txn(context.TODO(), txn); err != rpctypes.ErrFutureRev {
-		t.Errorf("err = %v, want %v", err, rpctypes.ErrFutureRev)
+	if _, err := kvc.Txn(context.TODO(), txn); err != rpctypes.ErrGRPCFutureRev {
+		t.Errorf("err = %v, want %v", err, rpctypes.ErrGRPCFutureRev)
 	}
 
 	// compacted rev
 	tv, _ := txn.Success[1].Request.(*pb.RequestUnion_RequestRange)
 	tv.RequestRange.Revision = 1
-	if _, err := kvc.Txn(context.TODO(), txn); err != rpctypes.ErrCompacted {
-		t.Errorf("err = %v, want %v", err, rpctypes.ErrCompacted)
+	if _, err := kvc.Txn(context.TODO(), txn); err != rpctypes.ErrGRPCCompacted {
+		t.Errorf("err = %v, want %v", err, rpctypes.ErrGRPCCompacted)
 	}
 }
 
@@ -491,8 +525,8 @@ func TestV3TooLargeRequest(t *testing.T) {
 	preq := &pb.PutRequest{Key: []byte("foo"), Value: largeV}
 
 	_, err := kvc.Put(context.Background(), preq)
-	if err != rpctypes.ErrRequestTooLarge {
-		t.Errorf("err = %v, want %v", err, rpctypes.ErrRequestTooLarge)
+	if err != rpctypes.ErrGRPCRequestTooLarge {
+		t.Errorf("err = %v, want %v", err, rpctypes.ErrGRPCRequestTooLarge)
 	}
 }
 
@@ -545,8 +579,8 @@ func TestV3StorageQuotaAPI(t *testing.T) {
 	// test big put
 	bigbuf := make([]byte, 64*1024)
 	_, err := kvc.Put(context.TODO(), &pb.PutRequest{Key: key, Value: bigbuf})
-	if err == nil || err != rpctypes.ErrNoSpace {
-		t.Fatalf("big put got %v, expected %v", err, rpctypes.ErrNoSpace)
+	if err == nil || err != rpctypes.ErrGRPCNoSpace {
+		t.Fatalf("big put got %v, expected %v", err, rpctypes.ErrGRPCNoSpace)
 	}
 
 	// test big txn
@@ -561,8 +595,8 @@ func TestV3StorageQuotaAPI(t *testing.T) {
 	txnreq := &pb.TxnRequest{}
 	txnreq.Success = append(txnreq.Success, puttxn)
 	_, txnerr := kvc.Txn(context.TODO(), txnreq)
-	if txnerr == nil || err != rpctypes.ErrNoSpace {
-		t.Fatalf("big txn got %v, expected %v", err, rpctypes.ErrNoSpace)
+	if txnerr == nil || err != rpctypes.ErrGRPCNoSpace {
+		t.Fatalf("big txn got %v, expected %v", err, rpctypes.ErrGRPCNoSpace)
 	}
 }
 
@@ -597,9 +631,31 @@ func TestV3StorageQuotaApply(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// quorum get should work regardless of whether alarm is raised
+	_, err = kvc0.Range(context.TODO(), &pb.RangeRequest{Key: []byte("foo")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// wait until alarm is raised for sure-- poll the alarms
+	stopc := time.After(5 * time.Second)
+	for {
+		req := &pb.AlarmRequest{Action: pb.AlarmRequest_GET}
+		resp, aerr := clus.Members[0].s.Alarm(context.TODO(), req)
+		if aerr != nil {
+			t.Fatal(aerr)
+		}
+		if len(resp.Alarms) != 0 {
+			break
+		}
+		select {
+		case <-stopc:
+			t.Fatalf("timed out waiting for alarm")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
 	// small quota machine should reject put
-	// first, synchronize with the cluster via quorum get
-	kvc0.Range(context.TODO(), &pb.RangeRequest{Key: []byte("foo")})
 	if _, err := kvc0.Put(context.TODO(), &pb.PutRequest{Key: key, Value: smallbuf}); err == nil {
 		t.Fatalf("past-quota instance should reject put")
 	}
@@ -638,8 +694,8 @@ func TestV3AlarmDeactivate(t *testing.T) {
 	key := []byte("abc")
 	smallbuf := make([]byte, 512)
 	_, err := kvc.Put(context.TODO(), &pb.PutRequest{Key: key, Value: smallbuf})
-	if err == nil && err != rpctypes.ErrNoSpace {
-		t.Fatalf("put got %v, expected %v", err, rpctypes.ErrNoSpace)
+	if err == nil && err != rpctypes.ErrGRPCNoSpace {
+		t.Fatalf("put got %v, expected %v", err, rpctypes.ErrGRPCNoSpace)
 	}
 
 	alarmReq.Action = pb.AlarmRequest_DEACTIVATE
@@ -916,5 +972,94 @@ func TestTLSGRPCAcceptSecureAll(t *testing.T) {
 	reqput := &pb.PutRequest{Key: []byte("foo"), Value: []byte("bar")}
 	if _, err := toGRPC(client).KV.Put(context.TODO(), reqput); err != nil {
 		t.Fatalf("unexpected error on put over tls (%v)", err)
+	}
+}
+
+func TestGRPCRequireLeader(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	cfg := ClusterConfig{Size: 3}
+	clus := newClusterV3NoClients(t, &cfg)
+	defer clus.Terminate(t)
+
+	clus.Members[1].Stop(t)
+	clus.Members[2].Stop(t)
+
+	client, err := NewClientV3(clus.Members[0])
+	if err != nil {
+		t.Fatalf("cannot create client: %v", err)
+	}
+	defer client.Close()
+
+	// wait for election timeout, then member[0] will not have a leader.
+	time.Sleep(time.Duration(3*electionTicks) * tickDuration)
+
+	md := metadata.Pairs(rpctypes.MetadataRequireLeaderKey, rpctypes.MetadataHasLeader)
+	ctx := metadata.NewContext(context.Background(), md)
+	reqput := &pb.PutRequest{Key: []byte("foo"), Value: []byte("bar")}
+	if _, err := toGRPC(client).KV.Put(ctx, reqput); grpc.ErrorDesc(err) != rpctypes.ErrNoLeader.Error() {
+		t.Errorf("err = %v, want %v", err, rpctypes.ErrNoLeader)
+	}
+}
+
+func TestGRPCStreamRequireLeader(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	cfg := ClusterConfig{Size: 3}
+	clus := newClusterV3NoClients(t, &cfg)
+	defer clus.Terminate(t)
+
+	client, err := NewClientV3(clus.Members[0])
+	if err != nil {
+		t.Fatalf("failed to create client (%v)", err)
+	}
+	defer client.Close()
+
+	wAPI := toGRPC(client).Watch
+	md := metadata.Pairs(rpctypes.MetadataRequireLeaderKey, rpctypes.MetadataHasLeader)
+	ctx := metadata.NewContext(context.Background(), md)
+	wStream, err := wAPI.Watch(ctx)
+	if err != nil {
+		t.Fatalf("wAPI.Watch error: %v", err)
+	}
+
+	clus.Members[1].Stop(t)
+	clus.Members[2].Stop(t)
+
+	// existing stream should be rejected
+	_, err = wStream.Recv()
+	if grpc.ErrorDesc(err) != rpctypes.ErrNoLeader.Error() {
+		t.Errorf("err = %v, want %v", err, rpctypes.ErrNoLeader)
+	}
+
+	// new stream should also be rejected
+	wStream, err = wAPI.Watch(ctx)
+	if err != nil {
+		t.Fatalf("wAPI.Watch error: %v", err)
+	}
+	_, err = wStream.Recv()
+	if grpc.ErrorDesc(err) != rpctypes.ErrNoLeader.Error() {
+		t.Errorf("err = %v, want %v", err, rpctypes.ErrNoLeader)
+	}
+
+	clus.Members[1].Restart(t)
+	clus.Members[2].Restart(t)
+
+	clus.waitLeader(t, clus.Members)
+	time.Sleep(time.Duration(2*electionTicks) * tickDuration)
+
+	// new stream should also be OK now after we restarted the other members
+	wStream, err = wAPI.Watch(ctx)
+	if err != nil {
+		t.Fatalf("wAPI.Watch error: %v", err)
+	}
+	wreq := &pb.WatchRequest{
+		RequestUnion: &pb.WatchRequest_CreateRequest{
+			CreateRequest: &pb.WatchCreateRequest{Key: []byte("foo")},
+		},
+	}
+	err = wStream.Send(wreq)
+	if err != nil {
+		t.Errorf("err = %v, want nil", err)
 	}
 }

@@ -1,4 +1,4 @@
-// Copyright 2016 Nippon Telegraph and Telephone Corporation.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 
 	"github.com/coreos/etcd/auth/authpb"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
-	"github.com/coreos/etcd/storage/backend"
+	"github.com/coreos/etcd/mvcc/backend"
 	"github.com/coreos/pkg/capnslog"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -44,10 +44,13 @@ var (
 )
 
 type AuthStore interface {
-	// AuthEnable() turns on the authentication feature
+	// AuthEnable turns on the authentication feature
 	AuthEnable()
 
-	// Authenticate() does authentication based on given user name and password,
+	// AuthDisable turns off the authentication feature
+	AuthDisable()
+
+	// Authenticate does authentication based on given user name and password,
 	// and returns a token for successful case.
 	// Note that the generated token is valid only for the member the client
 	// connected to within fixed time duration. Reauth is required after the duration.
@@ -90,6 +93,19 @@ func (as *authStore) AuthEnable() {
 	b.ForceCommit()
 
 	plog.Noticef("Authentication enabled")
+}
+
+func (as *authStore) AuthDisable() {
+	value := []byte{0}
+
+	b := as.be
+	tx := b.BatchTx()
+	tx.Lock()
+	tx.UnsafePut(authBucketName, enableFlagKey, value)
+	tx.Unlock()
+	b.ForceCommit()
+
+	plog.Noticef("Authentication disabled")
 }
 
 func (as *authStore) Authenticate(name string, password string) (*pb.AuthenticateResponse, error) {

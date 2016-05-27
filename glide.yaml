@@ -1,6 +1,6 @@
 package: github.com/projectcalico/calico-cni
 import:
-- package: github.com/appc/cni
+- package: github.com/containernetworking/cni
   subpackages:
   - pkg/ip
   - pkg/ipam
@@ -8,12 +8,9 @@ import:
   - pkg/skel
   - pkg/types
 - package: github.com/projectcalico/libcalico
+  subpackages:
+  - lib
+  repo: git@github.com:tomdee/libcalico.git
   vcs: git
   version: go
-  repo: git@github.com:tomdee/libcalico.git
-  subpackages:
-  - pkg
-  - pkg/endpoint
-  - pkg/profile
-  - pkg/workload
 - package: github.com/vishvananda/netlink

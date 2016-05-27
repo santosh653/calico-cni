@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
-	"time"
 )
 
 func TestUserspaceProxy(t *testing.T) {
@@ -43,17 +42,12 @@ func TestUserspaceProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	p := tcpProxy{
-		l:               l,
-		donec:           make(chan struct{}),
-		monitorInterval: time.Second,
-
-		remotes: []*remote{
-			{addr: u.Host},
-		},
+	p := TCPProxy{
+		Listener:  l,
+		Endpoints: []string{u.Host},
 	}
-	go p.run()
-	defer p.stop()
+	go p.Run()
+	defer p.Stop()
 
 	u.Host = l.Addr().String()
 

@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -175,6 +175,7 @@ func (c *cluster) WaitHealth() error {
 		if err == nil {
 			return nil
 		}
+		plog.Warningf("#%d setHealthKey error (%v)", i, err)
 		time.Sleep(time.Second)
 	}
 	return err
@@ -271,7 +272,7 @@ func setHealthKey(us []string) error {
 		cancel()
 		conn.Close()
 		if err != nil {
-			return err
+			return fmt.Errorf("%v (%s)", err, u)
 		}
 	}
 	return nil
@@ -320,7 +321,7 @@ func (c *cluster) getRevisionHash() (map[string]int64, map[string]int64, error) 
 	return revs, hashes, nil
 }
 
-func (c *cluster) compactKV(rev int64) (err error) {
+func (c *cluster) compactKV(rev int64, timeout time.Duration) (err error) {
 	if rev <= 0 {
 		return nil
 	}
@@ -332,7 +333,7 @@ func (c *cluster) compactKV(rev int64) (err error) {
 			continue
 		}
 		kvc := pb.NewKVClient(conn)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		_, cerr := kvc.Compact(ctx, &pb.CompactionRequest{Revision: rev, Physical: true})
 		cancel()
 		conn.Close()

@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -140,8 +140,13 @@ func (cx *ctlCtx) PrefixArgs() []string {
 	}
 	cmdArgs := []string{"../bin/etcdctl", "--endpoints", endpoints, "--dial-timeout", cx.dialTimeout.String()}
 	if cx.epc.cfg.clientTLS == clientTLS {
-		cmdArgs = append(cmdArgs, "--cacert", caPath, "--cert", certPath, "--key", privateKeyPath)
+		if cx.epc.cfg.isClientAutoTLS {
+			cmdArgs = append(cmdArgs, "--insecure-transport=false", "--insecure-skip-tls-verify")
+		} else {
+			cmdArgs = append(cmdArgs, "--cacert", caPath, "--cert", certPath, "--key", privateKeyPath)
+		}
 	}
+
 	return cmdArgs
 }
 

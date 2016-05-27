@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,18 +19,20 @@ import (
 	"testing"
 )
 
-func TestCtlV3Put(t *testing.T)          { testCtl(t, putTest) }
-func TestCtlV3PutNoTLS(t *testing.T)     { testCtl(t, putTest, withCfg(configNoTLS)) }
-func TestCtlV3PutClientTLS(t *testing.T) { testCtl(t, putTest, withCfg(configClientTLS)) }
-func TestCtlV3PutPeerTLS(t *testing.T)   { testCtl(t, putTest, withCfg(configPeerTLS)) }
-func TestCtlV3PutTimeout(t *testing.T)   { testCtl(t, putTest, withDialTimeout(0)) }
+func TestCtlV3Put(t *testing.T)              { testCtl(t, putTest) }
+func TestCtlV3PutNoTLS(t *testing.T)         { testCtl(t, putTest, withCfg(configNoTLS)) }
+func TestCtlV3PutClientTLS(t *testing.T)     { testCtl(t, putTest, withCfg(configClientTLS)) }
+func TestCtlV3PutClientAutoTLS(t *testing.T) { testCtl(t, putTest, withCfg(configClientAutoTLS)) }
+func TestCtlV3PutPeerTLS(t *testing.T)       { testCtl(t, putTest, withCfg(configPeerTLS)) }
+func TestCtlV3PutTimeout(t *testing.T)       { testCtl(t, putTest, withDialTimeout(0)) }
 
-func TestCtlV3Get(t *testing.T)          { testCtl(t, getTest) }
-func TestCtlV3GetNoTLS(t *testing.T)     { testCtl(t, getTest, withCfg(configNoTLS)) }
-func TestCtlV3GetClientTLS(t *testing.T) { testCtl(t, getTest, withCfg(configClientTLS)) }
-func TestCtlV3GetPeerTLS(t *testing.T)   { testCtl(t, getTest, withCfg(configPeerTLS)) }
-func TestCtlV3GetTimeout(t *testing.T)   { testCtl(t, getTest, withDialTimeout(0)) }
-func TestCtlV3GetQuorum(t *testing.T)    { testCtl(t, getTest, withQuorum()) }
+func TestCtlV3Get(t *testing.T)              { testCtl(t, getTest) }
+func TestCtlV3GetNoTLS(t *testing.T)         { testCtl(t, getTest, withCfg(configNoTLS)) }
+func TestCtlV3GetClientTLS(t *testing.T)     { testCtl(t, getTest, withCfg(configClientTLS)) }
+func TestCtlV3GetClientAutoTLS(t *testing.T) { testCtl(t, getTest, withCfg(configClientAutoTLS)) }
+func TestCtlV3GetPeerTLS(t *testing.T)       { testCtl(t, getTest, withCfg(configPeerTLS)) }
+func TestCtlV3GetTimeout(t *testing.T)       { testCtl(t, getTest, withDialTimeout(0)) }
+func TestCtlV3GetQuorum(t *testing.T)        { testCtl(t, getTest, withQuorum()) }
 
 func TestCtlV3GetFormat(t *testing.T) { testCtl(t, getFormatTest) }
 func TestCtlV3GetRev(t *testing.T)    { testCtl(t, getRevTest) }
@@ -73,6 +75,8 @@ func getTest(cx ctlCtx) {
 		wkv []kv
 	}{
 		{[]string{"key1"}, []kv{{"key1", "val1"}}},
+		{[]string{"", "--prefix"}, kvs},
+		{[]string{"", "--from-key"}, kvs},
 		{[]string{"key", "--prefix"}, kvs},
 		{[]string{"key", "--prefix", "--limit=2"}, kvs[:2]},
 		{[]string{"key", "--prefix", "--order=ASCEND", "--sort-by=MODIFY"}, kvs},

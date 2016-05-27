@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,6 +43,12 @@ type Config struct {
 
 	// Logger is the logger used by client library.
 	Logger Logger
+
+	// Username is a username for authentication
+	Username string
+
+	// Password is a password for authentication
+	Password string
 }
 
 type yamlConfig struct {

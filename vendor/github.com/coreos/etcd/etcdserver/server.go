@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,8 @@ import (
 	"github.com/coreos/etcd/etcdserver/membership"
 	"github.com/coreos/etcd/etcdserver/stats"
 	"github.com/coreos/etcd/lease"
+	"github.com/coreos/etcd/mvcc"
+	"github.com/coreos/etcd/mvcc/backend"
 	"github.com/coreos/etcd/pkg/fileutil"
 	"github.com/coreos/etcd/pkg/idutil"
 	"github.com/coreos/etcd/pkg/pbutil"
@@ -47,8 +49,6 @@ import (
 	"github.com/coreos/etcd/raft/raftpb"
 	"github.com/coreos/etcd/rafthttp"
 	"github.com/coreos/etcd/snap"
-	dstorage "github.com/coreos/etcd/storage"
-	"github.com/coreos/etcd/storage/backend"
 	"github.com/coreos/etcd/store"
 	"github.com/coreos/etcd/version"
 	"github.com/coreos/etcd/wal"
@@ -162,9 +162,11 @@ type EtcdServer struct {
 	// count the number of inflight snapshots.
 	// MUST use atomic operation to access this field.
 	inflightSnapshots int64
-	r                 raftNode
+	Cfg               *ServerConfig
 
-	cfg       *ServerConfig
+	readych chan struct{}
+	r       raftNode
+
 	snapCount uint64
 
 	w          wait.Wait
@@ -178,10 +180,10 @@ type EtcdServer struct {
 
 	store store.Store
 
-	applyV2 applierV2
+	applyV2 ApplierV2
 
 	applyV3    applierV3
-	kv         dstorage.ConsistentWatchableKV
+	kv         mvcc.ConsistentWatchableKV
 	lessor     lease.Lessor
 	bemu       sync.Mutex
 	be         backend.Backend
@@ -366,7 +368,8 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 	lstats := stats.NewLeaderStats(id.String())
 
 	srv = &EtcdServer{
-		cfg:       cfg,
+		readych:   make(chan struct{}),
+		Cfg:       cfg,
 		snapCount: cfg.SnapCount,
 		errorc:    make(chan error, 1),
 		store:     st,
@@ -388,11 +391,11 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 		msgSnapC:      make(chan raftpb.Message, maxInFlightMsgSnap),
 	}
 
-	srv.applyV2 = &applierV2store{srv}
+	srv.applyV2 = &applierV2store{store: srv.store, cluster: srv.cluster}
 
 	srv.be = be
 	srv.lessor = lease.NewLessor(srv.be)
-	srv.kv = dstorage.New(srv.be, srv.lessor, &srv.consistIndex)
+	srv.kv = mvcc.New(srv.be, srv.lessor, &srv.consistIndex)
 	srv.consistIndex.setConsistentIndex(srv.kv.ConsistentIndex())
 	srv.authStore = auth.NewAuthStore(srv.be)
 	if h := cfg.AutoCompactionRetention; h != 0 {
@@ -441,7 +444,7 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 // It also starts a goroutine to publish its server information.
 func (s *EtcdServer) Start() {
 	s.start()
-	go s.publish(s.cfg.ReqTimeout())
+	go s.publish(s.Cfg.ReqTimeout())
 	go s.purgeFile()
 	go monitorFileDescriptor(s.done)
 	go s.monitorVersions()
@@ -470,11 +473,11 @@ func (s *EtcdServer) start() {
 
 func (s *EtcdServer) purgeFile() {
 	var serrc, werrc <-chan error
-	if s.cfg.MaxSnapFiles > 0 {
-		serrc = fileutil.PurgeFile(s.cfg.SnapDir(), "snap", s.cfg.MaxSnapFiles, purgeFileInterval, s.done)
+	if s.Cfg.MaxSnapFiles > 0 {
+		serrc = fileutil.PurgeFile(s.Cfg.SnapDir(), "snap", s.Cfg.MaxSnapFiles, purgeFileInterval, s.done)
 	}
-	if s.cfg.MaxWALFiles > 0 {
-		werrc = fileutil.PurgeFile(s.cfg.WALDir(), "wal", s.cfg.MaxWALFiles, purgeFileInterval, s.done)
+	if s.Cfg.MaxWALFiles > 0 {
+		werrc = fileutil.PurgeFile(s.Cfg.WALDir(), "wal", s.Cfg.MaxWALFiles, purgeFileInterval, s.done)
 	}
 	select {
 	case e := <-werrc:
@@ -537,10 +540,14 @@ func (s *EtcdServer) run() {
 	}
 
 	defer func() {
-		s.r.stop()
 		sched.Stop()
 
+		// wait for snapshots before closing raft so wal stays open
 		s.wg.Wait()
+
+		// must stop raft after scheduler-- etcdserver can leak rafthttp pipelines
+		// by adding a peer after raft stops the transport
+		s.r.stop()
 
 		// kv, lessor and backend can be nil if running without v3 enabled
 		// or running unit tests.
@@ -617,7 +624,7 @@ func (s *EtcdServer) applySnapshot(ep *etcdProgress, apply *apply) {
 		plog.Panicf("get database snapshot file path error: %v", err)
 	}
 
-	fn := path.Join(s.cfg.SnapDir(), databaseFilename)
+	fn := path.Join(s.Cfg.SnapDir(), databaseFilename)
 	if err := os.Rename(snapfn, fn); err != nil {
 		plog.Panicf("rename snapshot file error: %v", err)
 	}
@@ -726,6 +733,10 @@ func (s *EtcdServer) Stop() {
 	<-s.done
 }
 
+// ReadyNotify returns a channel that will be closed when the server
+// is ready to serve client requests
+func (s *EtcdServer) ReadyNotify() <-chan struct{} { return s.readych }
+
 func (s *EtcdServer) stopWithDelay(d time.Duration, err error) {
 	select {
 	case <-time.After(d):
@@ -754,7 +765,7 @@ func (s *EtcdServer) LeaderStats() []byte {
 func (s *EtcdServer) StoreStats() []byte { return s.store.JsonStats() }
 
 func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) error {
-	if s.cfg.StrictReconfigCheck && !s.cluster.IsReadyToAddNewMember() {
+	if s.Cfg.StrictReconfigCheck && !s.cluster.IsReadyToAddNewMember() {
 		// If s.cfg.StrictReconfigCheck is false, it means the option --strict-reconfig-check isn't passed to etcd.
 		// In such a case adding a new member is allowed unconditionally
 		return ErrNotEnoughStartedMembers
@@ -774,7 +785,7 @@ func (s *EtcdServer) AddMember(ctx context.Context, memb membership.Member) erro
 }
 
 func (s *EtcdServer) RemoveMember(ctx context.Context, id uint64) error {
-	if s.cfg.StrictReconfigCheck && !s.cluster.IsReadyToRemoveMember(id) {
+	if s.Cfg.StrictReconfigCheck && !s.cluster.IsReadyToRemoveMember(id) {
 		// If s.cfg.StrictReconfigCheck is false, it means the option --strict-reconfig-check isn't passed to etcd.
 		// In such a case removing a member is allowed unconditionally
 		return ErrNotEnoughStartedMembers
@@ -813,7 +824,7 @@ func (s *EtcdServer) Lead() uint64 { return atomic.LoadUint64(&s.r.lead) }
 
 func (s *EtcdServer) Leader() types.ID { return types.ID(s.Lead()) }
 
-func (s *EtcdServer) IsPprofEnabled() bool { return s.cfg.EnablePprof }
+func (s *EtcdServer) IsPprofEnabled() bool { return s.Cfg.EnablePprof }
 
 // configure sends a configuration change through consensus and
 // then waits for it to be applied to the server. It
@@ -885,6 +896,7 @@ func (s *EtcdServer) publish(timeout time.Duration) {
 		cancel()
 		switch err {
 		case nil:
+			close(s.readych)
 			plog.Infof("published %+v to cluster %s", s.attributes, s.cluster.ID())
 			return
 		case ErrStopped:
@@ -928,7 +940,7 @@ func (s *EtcdServer) send(ms []raftpb.Message) {
 			ok, exceed := s.r.td.Observe(ms[i].To)
 			if !ok {
 				// TODO: limit request rate.
-				plog.Warningf("failed to send out heartbeat on time (deadline exceeded for %v)", exceed)
+				plog.Warningf("failed to send out heartbeat on time (exceeded the %dms timeout for %v)", s.Cfg.TickMs, exceed)
 				plog.Warningf("server is likely overloaded")
 			}
 		}
@@ -1210,7 +1222,7 @@ func (s *EtcdServer) updateClusterVersion(ver string) {
 		Path:   membership.StoreClusterVersionKey(),
 		Val:    ver,
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.ReqTimeout())
+	ctx, cancel := context.WithTimeout(context.Background(), s.Cfg.ReqTimeout())
 	_, err := s.Do(ctx, req)
 	cancel()
 	switch err {
@@ -1230,7 +1242,7 @@ func (s *EtcdServer) parseProposeCtxErr(err error, start time.Time) error {
 		return ErrCanceled
 	case context.DeadlineExceeded:
 		curLeadElected := s.r.leadElectedTime()
-		prevLeadLost := curLeadElected.Add(-2 * time.Duration(s.cfg.ElectionTicks) * time.Duration(s.cfg.TickMs) * time.Millisecond)
+		prevLeadLost := curLeadElected.Add(-2 * time.Duration(s.Cfg.ElectionTicks) * time.Duration(s.Cfg.TickMs) * time.Millisecond)
 		if start.After(prevLeadLost) && start.Before(curLeadElected) {
 			return ErrTimeoutDueToLeaderFail
 		}
@@ -1255,7 +1267,7 @@ func (s *EtcdServer) parseProposeCtxErr(err error, start time.Time) error {
 	}
 }
 
-func (s *EtcdServer) KV() dstorage.ConsistentWatchableKV { return s.kv }
+func (s *EtcdServer) KV() mvcc.ConsistentWatchableKV { return s.kv }
 func (s *EtcdServer) Backend() backend.Backend {
 	s.bemu.Lock()
 	defer s.bemu.Unlock()

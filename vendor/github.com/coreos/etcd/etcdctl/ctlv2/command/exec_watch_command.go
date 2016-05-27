@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -97,7 +97,7 @@ func execWatchCommandFunc(c *cli.Context, ki client.KeysAPI) {
 			handleError(ExitServerError, err)
 		}
 		if resp.Node.Dir {
-			fmt.Fprintf(os.Stderr, "Ignored dir %s change", resp.Node.Key)
+			fmt.Fprintf(os.Stderr, "Ignored dir %s change\n", resp.Node.Key)
 			continue
 		}
 

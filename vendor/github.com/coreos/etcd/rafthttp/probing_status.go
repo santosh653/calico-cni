@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -53,6 +53,7 @@ func monitorProbingStatus(s probing.Status, id string) {
 			if s.ClockDiff() > time.Second {
 				plog.Warningf("the clock difference against peer %s is too high [%v > %v]", id, s.ClockDiff(), time.Second)
 			}
+			rtts.WithLabelValues(id).Observe(s.SRTT().Seconds())
 		case <-s.StopNotify():
 			return
 		}

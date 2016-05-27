@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -68,11 +68,28 @@ func (e *encoder) encode(rec *walpb.Record) error {
 		}
 		data = e.buf[:n]
 	}
-	if err = writeInt64(e.bw, int64(len(data)), e.uint64buf); err != nil {
+
+	lenField, padBytes := encodeFrameSize(len(data))
+	if err = writeInt64(e.bw, int64(lenField), e.uint64buf); err != nil {
 		return err
+	}
+
+	if padBytes != 0 {
+		data = append(data, make([]byte, padBytes)...)
 	}
 	_, err = e.bw.Write(data)
 	return err
+}
+
+func encodeFrameSize(dataBytes int) (lenField uint64, padBytes int) {
+	lenField = uint64(dataBytes)
+	// force 8 byte alignment so length never gets a torn write
+	if padBytes = 8 - (dataBytes % 8); padBytes != 8 {
+		lenField |= uint64(0x80|padBytes) << 56
+	} else {
+		padBytes = 0
+	}
+	return
 }
 
 func (e *encoder) flush() error {

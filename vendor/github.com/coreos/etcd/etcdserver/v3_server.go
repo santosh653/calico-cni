@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ import (
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/lease"
 	"github.com/coreos/etcd/lease/leasehttp"
-	dstorage "github.com/coreos/etcd/storage"
+	"github.com/coreos/etcd/mvcc"
 	"golang.org/x/net/context"
 )
 
@@ -30,6 +30,9 @@ const (
 	// accept large request which might block raft stream. User
 	// specify a large value might end up with shooting in the foot.
 	maxRequestBytes = 1.5 * 1024 * 1024
+
+	// max timeout for waiting a v3 request to go through raft.
+	maxV3RequestTimeout = 5 * time.Second
 )
 
 type RaftKV interface {
@@ -53,6 +56,7 @@ type Lessor interface {
 
 type Authenticator interface {
 	AuthEnable(ctx context.Context, r *pb.AuthEnableRequest) (*pb.AuthEnableResponse, error)
+	AuthDisable(ctx context.Context, r *pb.AuthDisableRequest) (*pb.AuthDisableResponse, error)
 	Authenticate(ctx context.Context, r *pb.AuthenticateRequest) (*pb.AuthenticateResponse, error)
 	UserAdd(ctx context.Context, r *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse, error)
 	UserDelete(ctx context.Context, r *pb.AuthUserDeleteRequest) (*pb.AuthUserDeleteResponse, error)
@@ -118,7 +122,7 @@ func isTxnSerializable(r *pb.TxnRequest) bool {
 
 func (s *EtcdServer) Compact(ctx context.Context, r *pb.CompactionRequest) (*pb.CompactionResponse, error) {
 	result, err := s.processInternalRaftRequest(ctx, pb.InternalRaftRequest{Compaction: r})
-	if r.Physical && result.physc != nil {
+	if r.Physical && result != nil && result.physc != nil {
 		<-result.physc
 		// The compaction is done deleting keys; the hash is now settled
 		// but the data is not necessarily committed. If there's a crash,
@@ -175,7 +179,7 @@ func (s *EtcdServer) LeaseRenew(id lease.LeaseID) (int64, error) {
 	leader := s.cluster.Member(s.Leader())
 	for i := 0; i < 5 && leader == nil; i++ {
 		// wait an election
-		dur := time.Duration(s.cfg.ElectionTicks) * time.Duration(s.cfg.TickMs) * time.Millisecond
+		dur := time.Duration(s.Cfg.ElectionTicks) * time.Duration(s.Cfg.TickMs) * time.Millisecond
 		select {
 		case <-time.After(dur):
 			leader = s.cluster.Member(s.Leader())
@@ -189,7 +193,7 @@ func (s *EtcdServer) LeaseRenew(id lease.LeaseID) (int64, error) {
 
 	for _, url := range leader.PeerURLs {
 		lurl := url + "/leases"
-		ttl, err = leasehttp.RenewHTTP(id, lurl, s.peerRt, s.cfg.peerDialTimeout())
+		ttl, err = leasehttp.RenewHTTP(id, lurl, s.peerRt, s.Cfg.peerDialTimeout())
 		if err == nil {
 			break
 		}
@@ -211,6 +215,14 @@ func (s *EtcdServer) AuthEnable(ctx context.Context, r *pb.AuthEnableRequest) (*
 		return nil, err
 	}
 	return result.resp.(*pb.AuthEnableResponse), result.err
+}
+
+func (s *EtcdServer) AuthDisable(ctx context.Context, r *pb.AuthDisableRequest) (*pb.AuthDisableResponse, error) {
+	result, err := s.processInternalRaftRequest(ctx, pb.InternalRaftRequest{AuthDisable: r})
+	if err != nil {
+		return nil, err
+	}
+	return result.resp.(*pb.AuthDisableResponse), result.err
 }
 
 func (s *EtcdServer) Authenticate(ctx context.Context, r *pb.AuthenticateRequest) (*pb.AuthenticateResponse, error) {
@@ -283,18 +295,21 @@ func (s *EtcdServer) processInternalRaftRequest(ctx context.Context, r pb.Intern
 
 	ch := s.w.Register(r.ID)
 
-	s.r.Propose(ctx, data)
+	cctx, cancel := context.WithTimeout(ctx, maxV3RequestTimeout)
+	defer cancel()
+
+	s.r.Propose(cctx, data)
 
 	select {
 	case x := <-ch:
 		return x.(*applyResult), nil
-	case <-ctx.Done():
+	case <-cctx.Done():
 		s.w.Trigger(r.ID, nil) // GC wait
-		return nil, ctx.Err()
+		return nil, cctx.Err()
 	case <-s.done:
 		return nil, ErrStopped
 	}
 }
 
 // Watchable returns a watchable interface attached to the etcdserver.
-func (s *EtcdServer) Watchable() dstorage.Watchable { return s.KV() }
+func (s *EtcdServer) Watchable() mvcc.Watchable { return s.KV() }

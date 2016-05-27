@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@ func alarmTest(cx ctlCtx) {
 	// test big put (to be rejected, and trigger quota alarm)
 	bigbuf := strings.Repeat("a", int(cx.quotaBackendBytes))
 	if err := ctlV3Put(cx, "abc", bigbuf, ""); err != nil {
-		if !strings.Contains(err.Error(), "etcdserver: storage: database space exceeded") {
+		if !strings.Contains(err.Error(), "etcdserver: mvcc: database space exceeded") {
 			cx.t.Fatal(err)
 		}
 	}
@@ -41,7 +41,7 @@ func alarmTest(cx ctlCtx) {
 
 	// alarm is on rejecting Puts and Txns
 	if err := ctlV3Put(cx, "def", smallbuf, ""); err != nil {
-		if !strings.Contains(err.Error(), "etcdserver: storage: database space exceeded") {
+		if !strings.Contains(err.Error(), "etcdserver: mvcc: database space exceeded") {
 			cx.t.Fatal(err)
 		}
 	}

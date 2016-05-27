@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,8 +25,8 @@ import (
 	"github.com/coreos/etcd/etcdserver/api/v3rpc"
 	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	"github.com/coreos/etcd/integration"
+	mvccpb "github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/coreos/etcd/pkg/testutil"
-	storagepb "github.com/coreos/etcd/storage/storagepb"
 	"golang.org/x/net/context"
 )
 
@@ -334,6 +334,62 @@ func putAndWatch(t *testing.T, wctx *watchctx, key, val string) {
 	}
 }
 
+// TestWatchResumeComapcted checks that the watcher gracefully closes in case
+// that it tries to resume to a revision that's been compacted out of the store.
+func TestWatchResumeCompacted(t *testing.T) {
+	defer testutil.AfterTest(t)
+
+	clus := integration.NewClusterV3(t, &integration.ClusterConfig{Size: 3})
+	defer clus.Terminate(t)
+
+	// create a waiting watcher at rev 1
+	w := clientv3.NewWatcher(clus.Client(0))
+	defer w.Close()
+	wch := w.Watch(context.Background(), "foo", clientv3.WithRev(1))
+	select {
+	case w := <-wch:
+		t.Errorf("unexpected message from wch %v", w)
+	default:
+	}
+	clus.Members[0].Stop(t)
+
+	ticker := time.After(time.Second * 10)
+	for clus.WaitLeader(t) <= 0 {
+		select {
+		case <-ticker:
+			t.Fatalf("failed to wait for new leader")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
+	// put some data and compact away
+	kv := clientv3.NewKV(clus.Client(1))
+	for i := 0; i < 5; i++ {
+		if _, err := kv.Put(context.TODO(), "foo", "bar"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := kv.Compact(context.TODO(), 3); err != nil {
+		t.Fatal(err)
+	}
+
+	clus.Members[0].Restart(t)
+
+	// get compacted error message
+	wresp, ok := <-wch
+	if !ok {
+		t.Fatalf("expected wresp, but got closed channel")
+	}
+	if wresp.Err() != rpctypes.ErrCompacted {
+		t.Fatalf("wresp.Err() expected %v, but got %v", rpctypes.ErrCompacted, wresp.Err())
+	}
+	// ensure the channel is closed
+	if wresp, ok = <-wch; ok {
+		t.Fatalf("expected closed channel, but got %v", wresp)
+	}
+}
+
 // TestWatchCompactRevision ensures the CompactRevision error is given on a
 // compaction event ahead of a watcher.
 func TestWatchCompactRevision(t *testing.T) {
@@ -364,7 +420,7 @@ func TestWatchCompactRevision(t *testing.T) {
 		t.Fatalf("expected wresp, but got closed channel")
 	}
 	if wresp.Err() != rpctypes.ErrCompacted {
-		t.Fatalf("wresp.Err() expected ErrCompacteed, but got %v", wresp.Err())
+		t.Fatalf("wresp.Err() expected %v, but got %v", rpctypes.ErrCompacted, wresp.Err())
 	}
 
 	// ensure the channel is closed
@@ -419,7 +475,7 @@ func testWatchWithProgressNotify(t *testing.T, watchOnPut bool) {
 		}
 		if watchOnPut { // wait for put if watch on the put key
 			ev := []*clientv3.Event{{Type: clientv3.EventTypePut,
-				Kv: &storagepb.KeyValue{Key: []byte("foox"), Value: []byte("bar"), CreateRevision: 2, ModRevision: 2, Version: 1}}}
+				Kv: &mvccpb.KeyValue{Key: []byte("foox"), Value: []byte("bar"), CreateRevision: 2, ModRevision: 2, Version: 1}}}
 			if !reflect.DeepEqual(ev, resp.Events) {
 				t.Fatalf("expected %+v, got %+v", ev, resp.Events)
 			}
@@ -457,7 +513,7 @@ func TestWatchEventType(t *testing.T) {
 	}
 
 	tests := []struct {
-		et       storagepb.Event_EventType
+		et       mvccpb.Event_EventType
 		isCreate bool
 		isModify bool
 	}{{

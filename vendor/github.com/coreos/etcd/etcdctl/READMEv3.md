@@ -419,10 +419,26 @@ On success, prints a humanized table of the member IDs, statuses, names, peer ad
 
 On success, prints a JSON listing of the member IDs, statuses, names, peer addresses, and client addresses. On failure, prints an error message and returns with a non-zero exit code.
 
+##### Protobuf reply
+
+The protobuf encoding of the MEMBER LIST [RPC response][member_list_rpc].
+
 #### Examples
 
 ```bash
 ./etcdctl member list
+8211f1d0f64f3269, started, infra1, http://127.0.0.1:12380, http://127.0.0.1:2379
+91bc3c398fb3c146, started, infra2, http://127.0.0.1:22380, http://127.0.0.1:22379
+fd422379fda50e48, started, infra3, http://127.0.0.1:32380, http://127.0.0.1:32379
+```
+
+```bash
+./etcdctl -w json member list
+{"header":{"cluster_id":17237436991929493444,"member_id":9372538179322589801,"raft_term":2},"members":[{"ID":9372538179322589801,"name":"infra1","peerURLs":["http://127.0.0.1:12380"],"clientURLs":["http://127.0.0.1:2379"]},{"ID":10501334649042878790,"name":"infra2","peerURLs":["http://127.0.0.1:22380"],"clientURLs":["http://127.0.0.1:22379"]},{"ID":18249187646912138824,"name":"infra3","peerURLs":["http://127.0.0.1:32380"],"clientURLs":["http://127.0.0.1:32379"]}]}
+```
+
+```bash
+./etcdctl -w table member list
 +------------------+---------+--------+------------------------+------------------------+
 |        ID        | STATUS  |  NAME  |       PEER ADDRS       |      CLIENT ADDRS      |
 +------------------+---------+--------+------------------------+------------------------+
@@ -430,11 +446,6 @@ On success, prints a JSON listing of the member IDs, statuses, names, peer addre
 | 91bc3c398fb3c146 | started | infra2 | http://127.0.0.1:22380 | http://127.0.0.1:22379 |
 | fd422379fda50e48 | started | infra3 | http://127.0.0.1:32380 | http://127.0.0.1:32379 |
 +------------------+---------+--------+------------------------+------------------------+
-```
-
-```bash
-./etcdctl -w json member list
-{"header":{"cluster_id":17237436991929493444,"member_id":9372538179322589801,"raft_term":2},"members":[{"ID":9372538179322589801,"name":"infra1","peerURLs":["http://127.0.0.1:12380"],"clientURLs":["http://127.0.0.1:2379"]},{"ID":10501334649042878790,"name":"infra2","peerURLs":["http://127.0.0.1:22380"],"clientURLs":["http://127.0.0.1:22379"]},{"ID":18249187646912138824,"name":"infra3","peerURLs":["http://127.0.0.1:32380"],"clientURLs":["http://127.0.0.1:32379"]}]}
 ```
 
 ## Utility Commands
@@ -477,17 +488,17 @@ On success, prints a humanized table of each endpoint URL, ID, version, database
 
 On success, prints a line of JSON encoding each endpoint URL, ID, version, database size, leadership status, raft term, and raft status. On failure, returns with a non-zero exit code.
 
+##### Protobuf reply
+
+ENDPOINT STATUS does not support protobuf encoded output.
+
 #### Examples
 
 ```bash
 ./etcdctl endpoint status
-+-----------------+------------------+-----------+---------+-----------+-----------+------------+
-|    ENDPOINT     |        ID        |  VERSION  | DB SIZE | IS LEADER | RAFT TERM | RAFT INDEX |
-+-----------------+------------------+-----------+---------+-----------+-----------+------------+
-| 127.0.0.1:2379  | 8211f1d0f64f3269 | 2.3.0+git | 25 kB   | false     |         2 |      31563 |
-| 127.0.0.1:22379 | 91bc3c398fb3c146 | 2.3.0+git | 25 kB   | false     |         2 |      31563 |
-| 127.0.0.1:32379 | fd422379fda50e48 | 2.3.0+git | 25 kB   | true      |         2 |      31563 |
-+-----------------+------------------+-----------+---------+-----------+-----------+------------+
+127.0.0.1:2379, 8211f1d0f64f3269, 3.0.0-beta.0+git, 25 kB, false, 2, 63
+127.0.0.1:22379, 91bc3c398fb3c146, 3.0.0-beta.0+git, 25 kB, false, 2, 63
+127.0.0.1:32379, fd422379fda50e48, 3.0.0-beta.0+git, 25 kB, true, 2, 63
 ```
 
 ```bash
@@ -495,6 +506,16 @@ On success, prints a line of JSON encoding each endpoint URL, ID, version, datab
 [{"Endpoint":"127.0.0.1:2379","Status":{"header":{"cluster_id":17237436991929493444,"member_id":9372538179322589801,"revision":2,"raft_term":2},"version":"2.3.0+git","dbSize":24576,"leader":18249187646912138824,"raftIndex":32623,"raftTerm":2}},{"Endpoint":"127.0.0.1:22379","Status":{"header":{"cluster_id":17237436991929493444,"member_id":10501334649042878790,"revision":2,"raft_term":2},"version":"2.3.0+git","dbSize":24576,"leader":18249187646912138824,"raftIndex":32623,"raftTerm":2}},{"Endpoint":"127.0.0.1:32379","Status":{"header":{"cluster_id":17237436991929493444,"member_id":18249187646912138824,"revision":2,"raft_term":2},"version":"2.3.0+git","dbSize":24576,"leader":18249187646912138824,"raftIndex":32623,"raftTerm":2}}]
 ```
 
+```bash
+./etcdctl -w table endpoint status
++-----------------+------------------+------------------+---------+-----------+-----------+------------+
+|    ENDPOINT     |        ID        |     VERSION      | DB SIZE | IS LEADER | RAFT TERM | RAFT INDEX |
++-----------------+------------------+------------------+---------+-----------+-----------+------------+
+| 127.0.0.1:2379  | 8211f1d0f64f3269 | 3.0.0-beta.0+git | 25 kB   | false     |         2 |         52 |
+| 127.0.0.1:22379 | 91bc3c398fb3c146 | 3.0.0-beta.0+git | 25 kB   | false     |         2 |         52 |
+| 127.0.0.1:32379 | fd422379fda50e48 | 3.0.0-beta.0+git | 25 kB   | true      |         2 |         52 |
++-----------------+------------------+------------------+---------+-----------+-----------+------------+
+```
 
 ### LOCK \<lockname\>
 
@@ -702,9 +723,23 @@ On success, prints a humanized table of the database hash, revision, total keys,
 
 On success, prints a line of JSON encoding the database hash, revision, total keys, and size. On failure, return with a non-zero exit code.
 
+##### Protobuf reply
+
+SNAPSHOT STATUS does not support protobuf encoded output.
+
 #### Examples
 ```bash
 ./etcdctl snapshot status file.db
+cf1550fb, 3, 3, 25 kB
+```
+
+```bash
+./etcdctl -write-out=json snapshot status file.db
+{"hash":3474280699,"revision":3,"totalKey":3,"totalSize":24576}
+```
+
+```bash
+./etcdctl -write-out=table snapshot status file.db
 +----------+----------+------------+------------+
 |   HASH   | REVISION | TOTAL KEYS | TOTAL SIZE |
 +----------+----------+------------+------------+
@@ -712,9 +747,57 @@ On success, prints a line of JSON encoding the database hash, revision, total ke
 +----------+----------+------------+------------+
 ```
 
-```bash
-./etcdctl -write-out=json snapshot status file.db
-{"hash":3474280699,"revision":3,"totalKey":3,"totalSize":24576}
+### MIGRATE [options]
+
+Migrate migrates keys in a v2 store to a mvcc store. Users should run migration command for all members in the cluster.
+
+#### Options
+
+- data-dir -- Path to the data directory
+
+- wal-dir -- Path to the WAL directory
+
+- transformer -- Path to the user-provided transformer program (default if not provided)
+
+#### Return value
+
+Simple reply
+
+- Exit code is zero when migration is finished successfully.
+
+- Error string if migration failed. Exit code is non-zero.
+
+#### Default transformer
+
+If user does not provide a transformer program, migrate command will use the default transformer. The default transformer transforms `storev2` formatted keys into `mvcc` formatted keys according to the following Go program:
+
+```go
+func transform(n *storev2.Node) *mvccpb.KeyValue {
+	if n.Dir {
+		return nil
+	}
+	kv := &mvccpb.KeyValue{
+		Key:            []byte(n.Key),
+		Value:          []byte(n.Value),
+		CreateRevision: int64(n.CreatedIndex),
+		ModRevision:    int64(n.ModifiedIndex),
+		Version:        1,
+	}
+	return kv
+}
+```
+
+#### User-provided transformer
+
+Users can provide a customized 1:n transformer function that transforms a key from the v2 store to any number of keys in the mvcc store. The migration program writes JSON formatted [v2 store keys][v2key] to the transformer program's stdin, reads protobuf formatted [mvcc keys][v3key] back from the transformer program's stdout, and finishes migration by saving the transformed keys into the mvcc store.
+
+The provided transformer should read until EOF and flush the stdout before exiting to ensure data integrity.
+
+#### Example
+
+```
+./etcdctl --data-dir=/var/etcd --transformer=k8s-transformer
+finished transforming keys
 ```
 
 ## Notes
@@ -723,7 +806,8 @@ On success, prints a line of JSON encoding the database hash, revision, total ke
 
 
 [etcdrpc]: ../etcdserver/etcdserverpb/rpc.proto
-[storagerpc]: ../storage/storagepb/kv.proto
+[storagerpc]: ../mvcc/mvccpb/kv.proto
+[member_list_rpc]: ../etcdserver/etcdserverpb/rpc.proto#L493-L497
 
 ## Compatibility Support
 
@@ -740,3 +824,6 @@ We ensure compatibility for the `simple` output format of normal commands in non
 backward compatibility for `JSON` format and the format in non-interactive mode. Currently, we do not ensure backward compatibility of utility commands.
 
 ### TODO: compatibility with etcd server
+
+[v2key]: ../store/node_extern.go#L28-L37
+[v3key]: ../mvcc/mvccpb/kv.proto#L12-L29

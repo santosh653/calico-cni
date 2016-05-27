@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,9 @@ import (
 
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/lease"
+	"github.com/coreos/etcd/mvcc"
+	"github.com/coreos/etcd/mvcc/mvccpb"
 	"github.com/coreos/etcd/pkg/types"
-	dstorage "github.com/coreos/etcd/storage"
-	"github.com/coreos/etcd/storage/storagepb"
 	"github.com/gogo/protobuf/proto"
 )
 
@@ -54,6 +54,7 @@ type applierV3 interface {
 	LeaseRevoke(lc *pb.LeaseRevokeRequest) (*pb.LeaseRevokeResponse, error)
 	Alarm(*pb.AlarmRequest) (*pb.AlarmResponse, error)
 	AuthEnable() (*pb.AuthEnableResponse, error)
+	AuthDisable() (*pb.AuthDisableResponse, error)
 	Authenticate(r *pb.AuthenticateRequest) (*pb.AuthenticateResponse, error)
 	UserAdd(ua *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse, error)
 	UserDelete(ua *pb.AuthUserDeleteRequest) (*pb.AuthUserDeleteResponse, error)
@@ -88,6 +89,8 @@ func (s *EtcdServer) applyV3Request(r *pb.InternalRaftRequest) *applyResult {
 		ar.resp, ar.err = s.applyV3.Alarm(r.Alarm)
 	case r.AuthEnable != nil:
 		ar.resp, ar.err = s.applyV3.AuthEnable()
+	case r.AuthDisable != nil:
+		ar.resp, ar.err = s.applyV3.AuthDisable()
 	case r.Authenticate != nil:
 		ar.resp, ar.err = s.applyV3.Authenticate(r.Authenticate)
 	case r.AuthUserAdd != nil:
@@ -166,7 +169,7 @@ func (a *applierV3backend) Range(txnID int64, r *pb.RangeRequest) (*pb.RangeResp
 	resp.Header = &pb.ResponseHeader{}
 
 	var (
-		kvs []storagepb.KeyValue
+		kvs []mvccpb.KeyValue
 		rev int64
 		err error
 	)
@@ -292,12 +295,12 @@ func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 func (a *applierV3backend) applyCompare(c *pb.Compare) (int64, bool) {
 	ckvs, rev, err := a.s.KV().Range(c.Key, nil, 1, 0)
 	if err != nil {
-		if err == dstorage.ErrTxnIDMismatch {
+		if err == mvcc.ErrTxnIDMismatch {
 			panic("unexpected txn ID mismatch error")
 		}
 		return rev, false
 	}
-	var ckv storagepb.KeyValue
+	var ckv mvccpb.KeyValue
 	if len(ckvs) != 0 {
 		ckv = ckvs[0]
 	} else {
@@ -406,13 +409,15 @@ func (a *applierV3backend) LeaseGrant(lc *pb.LeaseGrantRequest) (*pb.LeaseGrantR
 	if err == nil {
 		resp.ID = int64(l.ID)
 		resp.TTL = l.TTL
+		resp.Header = &pb.ResponseHeader{Revision: a.s.KV().Rev()}
 	}
+
 	return resp, err
 }
 
 func (a *applierV3backend) LeaseRevoke(lc *pb.LeaseRevokeRequest) (*pb.LeaseRevokeResponse, error) {
 	err := a.s.lessor.Revoke(lease.LeaseID(lc.ID))
-	return &pb.LeaseRevokeResponse{}, err
+	return &pb.LeaseRevokeResponse{Header: &pb.ResponseHeader{Revision: a.s.KV().Rev()}}, err
 }
 
 func (a *applierV3backend) Alarm(ar *pb.AlarmRequest) (*pb.AlarmResponse, error) {
@@ -493,6 +498,11 @@ func (a *applierV3backend) AuthEnable() (*pb.AuthEnableResponse, error) {
 	return &pb.AuthEnableResponse{}, nil
 }
 
+func (a *applierV3backend) AuthDisable() (*pb.AuthDisableResponse, error) {
+	a.s.AuthStore().AuthDisable()
+	return &pb.AuthDisableResponse{}, nil
+}
+
 func (a *applierV3backend) Authenticate(r *pb.AuthenticateRequest) (*pb.AuthenticateResponse, error) {
 	return a.s.AuthStore().Authenticate(r.Name, r.Password)
 }
@@ -557,7 +567,7 @@ func (a *quotaApplierV3) LeaseGrant(lc *pb.LeaseGrantRequest) (*pb.LeaseGrantRes
 	return resp, err
 }
 
-type kvSort struct{ kvs []storagepb.KeyValue }
+type kvSort struct{ kvs []mvccpb.KeyValue }
 
 func (s *kvSort) Swap(i, j int) {
 	t := s.kvs[i]
@@ -625,10 +635,10 @@ func (a *applierV3backend) checkRequestRange(reqs []*pb.RequestUnion) error {
 		}
 
 		if greq.Revision > a.s.KV().Rev() {
-			return dstorage.ErrFutureRev
+			return mvcc.ErrFutureRev
 		}
 		if greq.Revision < a.s.KV().FirstRev() {
-			return dstorage.ErrCompacted
+			return mvcc.ErrCompacted
 		}
 	}
 	return nil

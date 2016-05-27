@@ -1,4 +1,4 @@
-// Copyright 2016 CoreOS, Inc.
+// Copyright 2016 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,6 +49,38 @@ func snapshotTest(cx ctlCtx) {
 	}
 	if st.TotalKey < 3 {
 		cx.t.Fatalf("expected at least 3, got %d", st.TotalKey)
+	}
+}
+
+func TestCtlV3SnapshotCorrupt(t *testing.T) { testCtl(t, snapshotCorruptTest) }
+
+func snapshotCorruptTest(cx ctlCtx) {
+	fpath := "test.snapshot"
+	defer os.RemoveAll(fpath)
+
+	if err := ctlV3SnapshotSave(cx, fpath); err != nil {
+		cx.t.Fatalf("snapshotTest ctlV3SnapshotSave error (%v)", err)
+	}
+
+	// corrupt file
+	f, oerr := os.OpenFile(fpath, os.O_WRONLY, 0)
+	if oerr != nil {
+		cx.t.Fatal(oerr)
+	}
+	if _, err := f.Write(make([]byte, 512)); err != nil {
+		cx.t.Fatal(err)
+	}
+	f.Close()
+
+	defer os.RemoveAll("snap.etcd")
+	serr := spawnWithExpect(
+		append(cx.PrefixArgs(), "snapshot", "restore",
+			"--data-dir", "snap.etcd",
+			fpath),
+		"expected sha256")
+
+	if serr != nil {
+		cx.t.Fatal(serr)
 	}
 }
 

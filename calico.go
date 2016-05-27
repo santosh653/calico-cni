@@ -22,21 +22,18 @@ import (
 
 	"github.com/vishvananda/netlink"
 
-	"github.com/appc/cni/pkg/ip"
-	"github.com/appc/cni/pkg/ipam"
-	"github.com/appc/cni/pkg/ns"
-	"github.com/appc/cni/pkg/skel"
-	"github.com/appc/cni/pkg/types"
+	"github.com/containernetworking/cni/pkg/ip"
+	"github.com/containernetworking/cni/pkg/ipam"
+	"github.com/containernetworking/cni/pkg/ns"
+	"github.com/containernetworking/cni/pkg/skel"
+	"github.com/containernetworking/cni/pkg/types"
 	"net"
-	"github.com/projectcalico/libcalico/pkg/endpoint"
-	"github.com/projectcalico/libcalico/pkg/profile"
+	"github.com/projectcalico/libcalico/lib"
 	"crypto/tls"
 	"net/http"
 	"io/ioutil"
 	"crypto/x509"
 	"regexp"
-	"github.com/projectcalico/libcalico/pkg"
-	"github.com/projectcalico/libcalico/pkg/workload"
 	"strings"
 )
 
@@ -239,7 +236,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	etcd, err := pkg.GetKeysAPI(conf.EtcdAuthority, conf.EtcdEndpoints)
+	etcd, err := libcalico.GetKeysAPI(conf.EtcdAuthority, conf.EtcdEndpoints)
 	if err != nil {
 		return err
 	}
@@ -268,17 +265,17 @@ func cmdAdd(args *skel.CmdArgs) error {
 		profileID = conf.Name
 
 		// Create the profile if needed - name = network_name
-		exists, err := profile.ProfileExists(conf.Name, etcd)
+		exists, err := libcalico.ProfileExists(conf.Name, etcd)
 		if err != nil {
 			return err
 		}
 
 		if ! exists {
-			profile := profile.Profile{
+			profile := libcalico.Profile{
 				ID:conf.Name,
-				Rules:profile.Rules{
-					Inbound:[]profile.Rule{profile.Rule{Action:"allow", SrcTag:conf.Name}},
-					Outbound:[]profile.Rule{profile.Rule{Action:"allow"}}},
+				Rules:libcalico.Rules{
+					Inbound:[]libcalico.Rule{libcalico.Rule{Action:"allow", SrcTag:conf.Name}},
+					Outbound:[]libcalico.Rule{libcalico.Rule{Action:"allow"}}},
 				Tags:[]string{conf.Name}}
 			if err := profile.Write(etcd); err != nil {
 				return err
@@ -290,7 +287,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// behavior varies on whether we're running under k8s or not.
 	// Under k8s - TODO
 	// Otherwise - Just add a new profile to the endpoint.
-	found, theendpoint, err := endpoint.GetEndpoint(etcd, workload.Workload{Hostname:hostname, OrchestratorID:orchestratorId, WorkloadID:workloadID})
+	found, theendpoint, err := libcalico.GetEndpoint(etcd, libcalico.Workload{Hostname:hostname, OrchestratorID:orchestratorId, WorkloadID:workloadID})
 	var result *types.Result
 	if err != nil {
 		return err
@@ -328,7 +325,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 
 		// Create the endpoint
-		theendpoint = endpoint.Endpoint{
+		theendpoint = libcalico.Endpoint{
 			Hostname:hostname,
 			OrchestratorID:orchestratorId,
 			WorkloadID:workloadID,
@@ -381,11 +378,11 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 
 	// Remove the workload
-	etcd, err := pkg.GetKeysAPI(conf.EtcdAuthority, conf.EtcdEndpoints)
+	etcd, err := libcalico.GetKeysAPI(conf.EtcdAuthority, conf.EtcdEndpoints)
 	if err != nil {
 		return err
 	}
-	workload := workload.Workload{
+	workload := libcalico.Workload{
 		Hostname:hostname,
 		OrchestratorID:orchestratorId,
 		WorkloadID:workloadID}

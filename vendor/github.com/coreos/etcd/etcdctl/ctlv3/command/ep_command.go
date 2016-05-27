@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,7 +51,10 @@ func newEpStatusCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "status prints out the status of endpoints specified in `--endpoints` flag",
-		Run:   epStatusCommandFunc,
+		Long: `When --write-out is set to simple, this command prints out comma-separated status lists for each endpoint.
+The items in the lists are endpoint, ID, version, db size, is leader, raft term, raft index.
+`,
+		Run: epStatusCommandFunc,
 	}
 }
 
@@ -67,7 +70,7 @@ func epHealthCommandFunc(cmd *cobra.Command, args []string) {
 	dt := dialTimeoutFromCmd(cmd)
 	cfgs := []*v3.Config{}
 	for _, ep := range endpoints {
-		cfg, err := newClientCfg([]string{ep}, dt, sec)
+		cfg, err := newClientCfg([]string{ep}, dt, sec, nil)
 		if err != nil {
 			ExitWithError(ExitBadArgs, err)
 		}

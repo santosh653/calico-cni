@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc.
+// Copyright 2015 The etcd Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 package httpproxy
 
 import (
-	"log"
 	"math/rand"
 	"net/url"
 	"sync"
@@ -27,6 +26,10 @@ import (
 const defaultRefreshInterval = 30000 * time.Millisecond
 
 var once sync.Once
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 func newDirector(urlsFunc GetProxyURLs, failureWait time.Duration, refreshInterval time.Duration) *director {
 	d := &director{
@@ -135,10 +138,10 @@ func (ep *endpoint) Failed() {
 	ep.Available = false
 	ep.Unlock()
 
-	log.Printf("proxy: marked endpoint %s unavailable", ep.URL.String())
+	plog.Printf("marked endpoint %s unavailable", ep.URL.String())
 
 	if ep.failFunc == nil {
-		log.Printf("proxy: no failFunc defined, endpoint %s will be unavailable forever.", ep.URL.String())
+		plog.Printf("no failFunc defined, endpoint %s will be unavailable forever.", ep.URL.String())
 		return
 	}
 
@@ -149,7 +152,7 @@ func timedUnavailabilityFunc(wait time.Duration) func(*endpoint) {
 	return func(ep *endpoint) {
 		time.AfterFunc(wait, func() {
 			ep.Available = true
-			log.Printf("proxy: marked endpoint %s available, to retest connectivity", ep.URL.String())
+			plog.Printf("marked endpoint %s available, to retest connectivity", ep.URL.String())
 		})
 	}
 }
