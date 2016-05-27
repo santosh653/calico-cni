@@ -8,9 +8,12 @@ import:
   - pkg/skel
   - pkg/types
 - package: github.com/projectcalico/libcalico
-  subpackages:
-  - lib
+  version: go
   repo: git@github.com:tomdee/libcalico.git
   vcs: git
-  version: go
+  subpackages:
+  - lib
 - package: github.com/vishvananda/netlink
+- package: github.com/dchest/uniuri
+- package: github.com/onsi/gomega
+- package: github.com/stretchr/testify

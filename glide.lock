@@ -1,5 +1,5 @@
-hash: 83a339617ee937452586ab16e571114c9a7b1262e0e94fd6b20596372c6169b8
-updated: 2016-05-27T12:32:55.616963486-07:00
+hash: 2fe2963dc06bde215df3d23742b040f47b2a031e1e287735d6555c9ed79ca8c5
+updated: 2016-05-27T13:34:19.845130438-07:00
 imports:
 - name: github.com/containernetworking/cni
   version: ffff8ac2fd79a5a26690f13a76aadcd3ad431879
@@ -9,7 +9,10 @@ imports:
   - pkg/ns
   - pkg/skel
   - pkg/types
+  - libcni
   - pkg/invoke
+  - plugins/ipam/host-local/backend
+  - plugins/ipam/host-local/backend/disk
 - name: github.com/coreos/etcd
   version: d8f325dabf429c449e0beb8cde843d4a8f53211d
   subpackages:
@@ -20,6 +23,43 @@ imports:
   version: fbb73372b87f6e89951c2b6b31470c2c9d5cfae3
   subpackages:
   - iptables
+- name: github.com/coreos/go-systemd
+  version: 2688e91251d9d8e404e86dd8f096e23b2f086958
+  subpackages:
+  - activation
+- name: github.com/d2g/dhcp4
+  version: f0e4d29ff0231dce36e250b2ed9ff08412584bca
+- name: github.com/d2g/dhcp4client
+  version: bed07e1bc5b85f69c6f0fd73393aa35ec68ed892
+- name: github.com/davecgh/go-spew
+  version: 5215b55f46b2b919f50a1df0eaa5886afe4e3b3d
+  subpackages:
+  - spew
+- name: github.com/dchest/uniuri
+  version: 8902c56451e9b58ff940bbe5fec35d5f9c04584a
+- name: github.com/golang/protobuf
+  version: 9e6977f30c91c78396e719e164e57f9287fff42c
+  subpackages:
+  - proto
+  - proto/testdata
+  - ptypes/any
+- name: github.com/onsi/gomega
+  version: 2152b45fa28a361beba9aab0885972323a444e28
+  subpackages:
+  - internal/assertion
+  - internal/asyncassertion
+  - internal/testingtsupport
+  - matchers
+  - types
+  - internal/oraclematcher
+  - matchers/support/goraph/bipartitegraph
+  - matchers/support/goraph/edge
+  - matchers/support/goraph/node
+  - matchers/support/goraph/util
+- name: github.com/pmezard/go-difflib
+  version: d8ed2627bdf02c080bf22230dbb337003b7aba2d
+  subpackages:
+  - difflib
 - name: github.com/projectcalico/libcalico
   version: a0fe0e3fa29e8ea9cf6d0a4976f60c94c77db97c
   repo: git@github.com:tomdee/libcalico.git
@@ -28,6 +68,14 @@ imports:
   - lib
 - name: github.com/satori/go.uuid
   version: f9ab0dce87d815821e221626b772e3475a0d2749
+- name: github.com/stretchr/objx
+  version: cbeaeb16a013161a98496fad62933b1d21786672
+- name: github.com/stretchr/testify
+  version: 8d64eb7173c7753d6419fd4a9caf057398611364
+  subpackages:
+  - assert
+  - http
+  - mock
 - name: github.com/ugorji/go
   version: a396ed22fc049df733440d90efe17475e3929ccb
   subpackages:

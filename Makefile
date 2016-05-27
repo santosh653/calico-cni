@@ -121,7 +121,7 @@ glide:
 	ln -s $$GOPATH/bin/glide glide
 
 vendor: glide
-	./glide up -s -v
+	./glide up -strip-vcs -strip-vendor --update-vendored --all-dependencies
 
 dist/calico: $(shell find vendor -type f) flannel_build.created calico.go
 	mkdir -p dist
