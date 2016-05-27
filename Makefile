@@ -3,7 +3,7 @@
 # Version of calico/build to use.
 BUILD_VERSION=latest
 
-SRCFILES=$(shell find calico_cni -type f ! -path calico_cni/version.py) ipam.py
+SRCFILES=calico.go
 LOCAL_IP_ENV?=$(shell docker-machine ip)
 #ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
 
@@ -22,14 +22,6 @@ dist/calico-ipam: $(SRCFILES)
 	-v `pwd`:/code \
 	calico/build:$(BUILD_VERSION) \
 	pyinstaller ipam.py -ayF -n calico-ipam
-
-# Updates the version information in version.py
-update-version:
-	echo "# Auto-generated contents.  Do not manually edit" > calico_cni/version.py
-	echo "# or check in this file." >> calico_cni/version.py
-	echo "__version__ = '$(shell git describe --tags)'" >> calico_cni/version.py
-	echo "__commit__ = '$(shell git rev-parse HEAD)'" >> calico_cni/version.py
-	echo "__branch__ = '$(shell git rev-parse --abbrev-ref HEAD)'" >> calico_cni/version.py
 
 # Copy the plugin into place
 deploy-rkt: dist/calico
@@ -138,7 +130,7 @@ dist/calico: $(shell find vendor -type f) flannel_build.created calico.go
 	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
 	flannel_build bash -c '\
 		go build -o /mnt/artifacts/calico -ldflags "-extldflags -static \
-		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --dirty)" calico.go; \
+		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" calico.go; \
 		chown -R $(shell id -u):$(shell id -u) /mnt/artifacts'
 #	go build -v -o dist/caligo calico.go
 

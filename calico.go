@@ -75,9 +75,9 @@ var slash32 = net.CIDRMask(32, 32)
 
 func setupContainerVeth(netns, ifName string, mtu int, res *types.Result) (string, string, error) {
 	var hostVethName, contVethMAC string
-	err := ns.WithNetNSPath(netns, false, func(hostNS *os.File) error {
-
+	err := ns.WithNetNSPath(netns, func(hostNS ns.NetNS) error {
 		hostVeth, contVeth, err := ip.SetupVeth(ifName, mtu, hostNS)
+
 		if err != nil {
 			return err
 		}
@@ -115,6 +115,7 @@ func setupContainerVeth(netns, ifName string, mtu int, res *types.Result) (strin
 
 		return nil
 	})
+
 	return hostVethName, contVethMAC, err
 }
 
@@ -350,7 +351,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to load netconf: %v", err)
 	}
 
-	err := ns.WithNetNSPath(args.Netns, false, func(hostNS *os.File) error {
+	err := ns.WithNetNSPath(args.Netns, func(hostNS ns.NetNS) error {
 		var err error
 		_, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
 		return err
