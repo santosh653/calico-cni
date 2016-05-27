@@ -1,14 +1,7 @@
-build
 dist
-venv
-env
 .idea
-*.pyc
 *~
 *.created
-.coverage
-*.spec
-calico_cni/version.py
 glide
 kubectl
 net.d

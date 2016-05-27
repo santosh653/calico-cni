@@ -146,9 +146,20 @@ flannel_build.created: Dockerfile
 	docker build -t flannel_build .
 	touch flannel_build.created
 
-go_test: dist/calico dist/host-local
+go_test: dist/calico dist/host-local dist/calipo
 	docker run -ti --rm --privileged \
+	--hostname cnitests \
 	-e ETCD_IP=$(LOCAL_IP_ENV) \
+	-e PLUGIN=calico \
+	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
+	flannel_build bash -c '\
+		go test -v github.com/projectcalico/calico-cni/tests'
+
+python_test: dist/calipo dist/host-local
+	docker run -ti --rm --privileged \
+	--hostname cnitests \
+	-e ETCD_IP=$(LOCAL_IP_ENV) \
+	-e PLUGIN=calipo \
 	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
 	flannel_build bash -c '\
 		go test -v github.com/projectcalico/calico-cni/tests'
@@ -156,3 +167,8 @@ go_test: dist/calico dist/host-local
 dist/host-local:
 	mkdir -p dist
 	curl -L https://github.com/containernetworking/cni/releases/download/v0.2.2/cni-v0.2.2.tgz | tar -zxv -C dist
+
+dist/calipo:
+	mkdir -p dist
+	curl -L -o dist/calipo https://github.com/projectcalico/calico-cni/releases/download/v1.3.1/calico
+	chmod +x dist/calipo

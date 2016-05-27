@@ -128,7 +128,13 @@ func setupHostVeth(vethName, newVethName string) error {
 		return fmt.Errorf("failed to lookup %q: %v", vethName, err)
 	}
 
-	netlink.LinkSetName(veth, newVethName)
+	if err := netlink.LinkSetDown(veth); err != nil {
+		return fmt.Errorf("failed to set %q DOWN: %v", vethName, err)
+	}
+
+	if err := netlink.LinkSetName(veth, newVethName); err != nil {
+		return fmt.Errorf("failed to rename veth: %v to %v (%v)", vethName, newVethName, err)
+	}
 
 	if err := netlink.LinkSetUp(veth); err != nil {
 		return fmt.Errorf("failed to set %q UP: %v", vethName, err)
