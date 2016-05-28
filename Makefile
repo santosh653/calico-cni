@@ -16,13 +16,6 @@ test: ut
 plugin: dist/calico
 ipam: dist/calico-ipam
 
-# Makes the IPAM plugin.
-dist/calico-ipam: $(SRCFILES) 
-	docker run --rm \
-	-v `pwd`:/code \
-	calico/build:$(BUILD_VERSION) \
-	pyinstaller ipam.py -ayF -n calico-ipam
-
 # Copy the plugin into place
 deploy-rkt: dist/calico
 	cp dist/calico /etc/rkt/net.d
@@ -132,7 +125,16 @@ dist/calico: $(shell find vendor -type f) flannel_build.created calico.go
 		go build -o /mnt/artifacts/calico -ldflags "-extldflags -static \
 		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" calico.go; \
 		chown -R $(shell id -u):$(shell id -u) /mnt/artifacts'
-#	go build -v -o dist/caligo calico.go
+
+dist/calico-ipam: $(shell find vendor -type f) flannel_build.created ipam/calico-ipam.go
+	mkdir -p dist
+	docker run --rm \
+	-v ${PWD}/dist:/mnt/artifacts \
+	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
+	flannel_build bash -c '\
+		go build -o /mnt/artifacts/calico-ipam -ldflags "-extldflags -static \
+		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" ipam/calico-ipam.go; \
+		chown -R $(shell id -u):$(shell id -u) /mnt/artifacts'
 
 flannel_build.created: Dockerfile
 	docker build -t flannel_build .
