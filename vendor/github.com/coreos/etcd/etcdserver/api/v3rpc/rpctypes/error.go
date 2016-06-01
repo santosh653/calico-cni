@@ -43,6 +43,7 @@ var (
 	ErrGRPCRoleAlreadyExist = grpc.Errorf(codes.FailedPrecondition, "etcdserver: role name already exists")
 	ErrGRPCRoleNotFound     = grpc.Errorf(codes.FailedPrecondition, "etcdserver: role name not found")
 	ErrGRPCAuthFailed       = grpc.Errorf(codes.InvalidArgument, "etcdserver: authentication failed, invalid user ID or password")
+	ErrGRPCPermissionDenied = grpc.Errorf(codes.FailedPrecondition, "etcdserver: permission denied")
 
 	ErrGRPCNoLeader   = grpc.Errorf(codes.Unavailable, "etcdserver: no leader")
 	ErrGRPCNotCapable = grpc.Errorf(codes.Unavailable, "etcdserver: not capable")
@@ -70,6 +71,7 @@ var (
 		grpc.ErrorDesc(ErrGRPCRoleAlreadyExist): ErrGRPCRoleAlreadyExist,
 		grpc.ErrorDesc(ErrGRPCRoleNotFound):     ErrGRPCRoleNotFound,
 		grpc.ErrorDesc(ErrGRPCAuthFailed):       ErrGRPCAuthFailed,
+		grpc.ErrorDesc(ErrGRPCPermissionDenied): ErrGRPCPermissionDenied,
 
 		grpc.ErrorDesc(ErrGRPCNoLeader):   ErrGRPCNoLeader,
 		grpc.ErrorDesc(ErrGRPCNotCapable): ErrGRPCNotCapable,
@@ -98,9 +100,12 @@ var (
 	ErrRoleAlreadyExist = Error(ErrGRPCRoleAlreadyExist)
 	ErrRoleNotFound     = Error(ErrGRPCRoleNotFound)
 	ErrAuthFailed       = Error(ErrGRPCAuthFailed)
+	ErrPermissionDenied = Error(ErrGRPCPermissionDenied)
 
 	ErrNoLeader   = Error(ErrGRPCNoLeader)
 	ErrNotCapable = Error(ErrGRPCNotCapable)
+
+	ErrConnClosed = EtcdError{code: codes.Unavailable, desc: "clientv3: connection closed"}
 )
 
 // EtcdError defines gRPC server errors.

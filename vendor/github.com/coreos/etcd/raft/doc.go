@@ -77,7 +77,7 @@ not empty. Note that when writing an Entry with Index i, any
 previously-persisted entries with Index >= i must be discarded.
 
 2. Send all Messages to the nodes named in the To field. It is important that
-no messages be sent until after the latest HardState has been persisted to disk,
+no messages be sent until the latest HardState has been persisted to disk,
 and all Entries written by any previous Ready batch (Messages may be sent while
 entries from the same batch are being persisted). To reduce the I/O latency, an
 optimization can be applied to make leader write to disk in parallel with its

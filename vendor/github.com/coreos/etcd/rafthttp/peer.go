@@ -118,8 +118,22 @@ type peer struct {
 }
 
 func startPeer(transport *Transport, urls types.URLs, local, to, cid types.ID, r Raft, fs *stats.FollowerStats, errorc chan error) *peer {
+	plog.Infof("starting peer %s...", to)
+	defer plog.Infof("started peer %s", to)
+
 	status := newPeerStatus(to)
 	picker := newURLPicker(urls)
+	pipeline := &pipeline{
+		to:            to,
+		tr:            transport,
+		picker:        picker,
+		status:        status,
+		followerStats: fs,
+		raft:          r,
+		errorc:        errorc,
+	}
+	pipeline.start()
+
 	p := &peer{
 		id:             to,
 		r:              r,
@@ -127,7 +141,7 @@ func startPeer(transport *Transport, urls types.URLs, local, to, cid types.ID, r
 		picker:         picker,
 		msgAppV2Writer: startStreamWriter(to, status, fs, r),
 		writer:         startStreamWriter(to, status, fs, r),
-		pipeline:       newPipeline(transport, picker, local, to, cid, status, fs, r, errorc),
+		pipeline:       pipeline,
 		snapSender:     newSnapshotSender(transport, picker, local, to, cid, status, r, errorc),
 		sendc:          make(chan raftpb.Message),
 		recvc:          make(chan raftpb.Message, recvBufSize),
@@ -166,8 +180,26 @@ func startPeer(transport *Transport, urls types.URLs, local, to, cid types.ID, r
 		}
 	}()
 
-	p.msgAppV2Reader = startStreamReader(transport, picker, streamTypeMsgAppV2, local, to, cid, status, p.recvc, p.propc, errorc)
-	p.msgAppReader = startStreamReader(transport, picker, streamTypeMessage, local, to, cid, status, p.recvc, p.propc, errorc)
+	p.msgAppV2Reader = &streamReader{
+		typ:    streamTypeMsgAppV2,
+		tr:     transport,
+		picker: picker,
+		to:     to,
+		status: status,
+		recvc:  p.recvc,
+		propc:  p.propc,
+	}
+	p.msgAppReader = &streamReader{
+		typ:    streamTypeMessage,
+		tr:     transport,
+		picker: picker,
+		to:     to,
+		status: status,
+		recvc:  p.recvc,
+		propc:  p.propc,
+	}
+	p.msgAppV2Reader.start()
+	p.msgAppReader.start()
 
 	return p
 }
@@ -241,6 +273,9 @@ func (p *peer) Resume() {
 }
 
 func (p *peer) stop() {
+	plog.Infof("stopping peer %s...", p.id)
+	defer plog.Infof("stopped peer %s", p.id)
+
 	close(p.stopc)
 	p.cancel()
 	p.msgAppV2Writer.stop()

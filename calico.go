@@ -314,7 +314,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return errors.New("IPAM plugin returned missing IPv4 config")
 		}
 
-		hostVethName, contVethMAC, err := setupContainerVeth(args.Netns, args.IfName, conf.MTU, result)
+		hostVethName, _, err := setupContainerVeth(args.Netns, args.IfName, conf.MTU, result)
 		if err != nil {
 			return err
 		}
@@ -330,7 +330,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			Hostname:hostname,
 			OrchestratorID:orchestratorId,
 			WorkloadID:workloadID,
-			Mac: contVethMAC,
+			Mac: "EE:EE:EE:EE:EE:EE",
 			State:"active",
 			Name:newHostVethName,
 			IPv4Nets:[]string{result.IP4.IP.String()},

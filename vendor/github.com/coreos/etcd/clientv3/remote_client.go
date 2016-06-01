@@ -17,6 +17,8 @@ package clientv3
 import (
 	"sync"
 
+	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
+
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 )
@@ -78,17 +80,23 @@ func (r *remoteClient) tryUpdate() bool {
 	return true
 }
 
+// acquire gets the client read lock on an established connection or
+// returns an error without holding the lock.
 func (r *remoteClient) acquire(ctx context.Context) error {
 	for {
-		r.client.mu.RLock()
-		c := r.client.conn
 		r.mu.Lock()
+		r.client.mu.RLock()
+		closed := r.client.cancel == nil
+		c := r.client.conn
 		match := r.conn == c
 		r.mu.Unlock()
-		if match {
+		if c != nil && match {
 			return nil
 		}
 		r.client.mu.RUnlock()
+		if closed {
+			return rpctypes.ErrConnClosed
+		}
 		if err := r.reconnectWait(ctx, nil); err != nil {
 			return err
 		}

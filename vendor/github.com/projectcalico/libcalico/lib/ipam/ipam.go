@@ -359,7 +359,7 @@ func NewIPAMClient() (*IPAMClient, error) {
 	// Create the interface into etcd for blocks.
 	log.Println("Creating new IPAM client")
 	config := client.Config{
-		Endpoints:               []string{"http://192.168.99.100:2379"},
+		Endpoints:               []string{"http://localhost:2379"},
 		Transport:               client.DefaultTransport,
 		HeaderTimeoutPerRequest: time.Second,
 	}

@@ -4,8 +4,8 @@
 BUILD_VERSION=latest
 
 SRCFILES=calico.go
-LOCAL_IP_ENV?=$(shell docker-machine ip)
-#ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
+#LOCAL_IP_ENV?=$(shell docker-machine ip)
+LOCAL_IP_ENV?=$(ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
 
 K8S_VERSION=1.2.3
 
@@ -51,7 +51,7 @@ run-etcd:
 	@-docker rm -f calico-etcd
 	docker run --detach \
 	--net=host \
-	--name calico-etcd quay.io/coreos/etcd:v2.2.2 \
+	--name calico-etcd quay.io/coreos/etcd:v2.3.6 \
 	--advertise-client-urls "http://$(LOCAL_IP_ENV):2379,http://127.0.0.1:2379,http://$(LOCAL_IP_ENV):4001,http://127.0.0.1:4001" \
 	--listen-client-urls "http://0.0.0.0:2379,http://0.0.0.0:4001"
 
@@ -118,13 +118,14 @@ vendor: glide
 
 dist/calico: $(shell find vendor -type f) flannel_build.created calico.go
 	mkdir -p dist
-	docker run --rm \
-	-v ${PWD}/dist:/mnt/artifacts \
-	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
-	flannel_build bash -c '\
-		go build -o /mnt/artifacts/calico -ldflags "-extldflags -static \
-		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" calico.go; \
-		chown -R $(shell id -u):$(shell id -u) /mnt/artifacts'
+#	docker run --rm \
+#	-v ${PWD}/dist:/mnt/artifacts \
+#	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
+#	flannel_build bash -c '\
+#		go build -o /mnt/artifacts/calico -ldflags "-extldflags -static \
+#		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" calico.go; \
+#		chown -R $(shell id -u):$(shell id -u) /mnt/artifacts'
+	go build -o dist/calico -ldflags "-extldflags -static" calico.go
 
 dist/calico-ipam: $(shell find vendor -type f) flannel_build.created ipam/calico-ipam.go
 	mkdir -p dist
