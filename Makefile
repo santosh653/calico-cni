@@ -125,7 +125,7 @@ dist/calico: $(shell find vendor -type f) flannel_build.created calico.go
 #		go build -o /mnt/artifacts/calico -ldflags "-extldflags -static \
 #		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" calico.go; \
 #		chown -R $(shell id -u):$(shell id -u) /mnt/artifacts'
-	go build -o dist/calico -ldflags "-extldflags -static" calico.go
+	go build -o dist/calico -ldflags "-extldflags -static -X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
 
 dist/calico-ipam: $(shell find vendor -type f) flannel_build.created ipam/calico-ipam.go
 	mkdir -p dist

@@ -29,6 +29,7 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 	"github.com/projectcalico/libcalico/lib"
 	. "github.com/projectcalico/calico-cni/utils"
+	"flag"
 )
 
 var hostname string
@@ -252,7 +253,15 @@ func cmdDel(args *skel.CmdArgs) error {
 	return ipam.ExecDel(conf.IPAM.Type, args.StdinData)
 }
 
+var VERSION string
+
 func main() {
+	version := flag.Bool("v", false, "Display version")
+	flag.Parse()
+	if *version {
+		fmt.Println(VERSION)
+		os.Exit(0)
+	}
 	skel.PluginMain(cmdAdd, cmdDel)
 }
 

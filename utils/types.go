@@ -16,5 +16,5 @@ type NetConf struct {
 	MTU           int  `json:"mtu"`
 	EtcdAuthority string `json:"etcd_authority"`
 	EtcdEndpoints string `json:"etcd_endpoints"`
-	Policy        Policy `json:"policy"`
+	Policy        *Policy `json:"policy"`
 }

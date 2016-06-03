@@ -15,13 +15,13 @@ var slash32 = net.CIDRMask(32, 32)
 func DoNetworking(args *skel.CmdArgs, conf NetConf, result *types.Result) (string, error) {
 	hostVethName, _, err := setupContainerVeth(args.Netns, args.IfName, conf.MTU, result)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// Select the first 11 characters of the containerID for the host veth
 	newHostVethName := "cali" + args.ContainerID[:Min(11, len(args.ContainerID))]
 	if err = setupHostVeth(hostVethName, newHostVethName); err != nil {
-		return err
+		return "", err
 	}
 	return newHostVethName, nil
 }
