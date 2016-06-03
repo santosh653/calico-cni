@@ -208,20 +208,19 @@ func cmdAdd(args *skel.CmdArgs) error {
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	conf := NetConf{}
-	if err := json.Unmarshal(args.StdinData, &conf); err != nil {
+	n := NetConf{}
+	if err := json.Unmarshal(args.StdinData, &n); err != nil {
 		return fmt.Errorf("failed to load netconf: %v", err)
 	}
 
-	err := ns.WithNetNSPath(args.Netns, func(hostNS ns.NetNS) error {
-		var err error
-		_, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
-		return err
-	})
-	if err != nil {
+	// Always try to release the address
+	AddIgnoreUnknownArgs()
+	if err := ipam.ExecDel(n.IPAM.Type, args.StdinData); err != nil {
 		return err
 	}
 
+	// Always try to clean up the workload/endpoint.
+	// First determine if running under k8s to get the right workload and orchestrator IDs
 	k8sArgs := K8sArgs{}
 	if args.Args != "" {
 		err := LoadArgs(args.Args, &k8sArgs)
@@ -240,8 +239,8 @@ func cmdDel(args *skel.CmdArgs) error {
 		orchestratorId = "cni"
 	}
 
-	// Remove the workload
-	etcd, err := libcalico.GetKeysAPI(conf.EtcdAuthority, conf.EtcdEndpoints)
+	// Actually remove the workload
+	etcd, err := libcalico.GetKeysAPI(n.EtcdAuthority, n.EtcdEndpoints)
 	if err != nil {
 		return err
 	}
@@ -253,7 +252,21 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	return ipam.ExecDel(conf.IPAM.Type, args.StdinData)
+	// Only try to delete the device if a namespace was passed in
+	if args.Netns != "" {
+		var ipn *net.IPNet
+		err := ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
+			var err error
+			ipn, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
+			return err
+		})
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 var VERSION string
