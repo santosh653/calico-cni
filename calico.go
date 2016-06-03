@@ -1,4 +1,4 @@
-// Copyright 2015 CoreOS, Inc. and Metaswitch Networks
+// Copyright 2015 Tigera Inc
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,14 +27,8 @@ import (
 	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
-	"net"
 	"github.com/projectcalico/libcalico/lib"
-	"crypto/tls"
-	"net/http"
-	"io/ioutil"
-	"crypto/x509"
-	"regexp"
-	"strings"
+	. "github.com/projectcalico/calico-cni/utils"
 )
 
 var hostname string
@@ -48,192 +42,18 @@ func init() {
 	hostname, _ = os.Hostname()
 }
 
-type Policy struct {
-	PolicyType              string `json:"type"`
-	K8sApiRoot              string `json:"k8s_api_root"`
-	K8sAuthToken            string `json:"k8s_auth_token"`
-	K8sClientCertificate    string `json:"k8s_client_certificate"`
-	K8sClientKey            string `json:"k8s_client_key"`
-	K8sCertificateAuthority string `json:"k8s_certificate_authority"`
-}
-
-type NetConf struct {
-	types.NetConf
-	MTU           int  `json:"mtu"`
-	EtcdAuthority string `json:"etcd_authority"`
-	EtcdEndpoints string `json:"etcd_endpoints"`
-	Policy        Policy `json:"policy"`
-}
-
-type K8sArgs struct {
-	K8S_POD_NAME               string
-	K8S_POD_NAMESPACE          string
-	K8S_POD_INFRA_CONTAINER_ID string
-}
-
-var slash32 = net.CIDRMask(32, 32)
-
-func setupContainerVeth(netns, ifName string, mtu int, res *types.Result) (string, string, error) {
-	var hostVethName, contVethMAC string
-	err := ns.WithNetNSPath(netns, func(hostNS ns.NetNS) error {
-		hostVeth, contVeth, err := ip.SetupVeth(ifName, mtu, hostNS)
-
-		if err != nil {
-			return err
-		}
-
-		gw := net.IPv4(169, 254, 1, 1)
-		ipn := &net.IPNet{IP: gw, Mask: slash32}
-		if err = netlink.RouteAdd(&netlink.Route{
-			LinkIndex: contVeth.Attrs().Index,
-			Scope:     netlink.SCOPE_LINK,
-			Dst:       ipn}); err != nil {
-			return fmt.Errorf("failed to add route %v", err)
-		}
-
-		_, defNet, _ := net.ParseCIDR("0.0.0.0/0")
-
-		if err = ip.AddRoute(defNet, gw, contVeth); err != nil {
-			return fmt.Errorf("failed to add route %v", err)
-		}
-
-		address := &netlink.Addr{Label: "", IPNet: &net.IPNet{
-			IP:   res.IP4.IP.IP, Mask: slash32} }
-		if err = netlink.AddrAdd(contVeth, address); err != nil {
-			return fmt.Errorf("failed to add IP addr to %q: %v", ifName, err)
-		}
-
-		hostVethName = hostVeth.Attrs().Name
-
-		contVeth, err = netlink.LinkByName(ifName)
-		if err != nil {
-			err = fmt.Errorf("failed to lookup %q: %v", ifName, err)
-			return err
-		}
-
-		contVethMAC = contVeth.Attrs().HardwareAddr.String()
-
-		return nil
-	})
-
-	return hostVethName, contVethMAC, err
-}
-
-func setupHostVeth(vethName, newVethName string) error {
-	// hostVeth moved namespaces and may have a new ifindex
-	veth, err := netlink.LinkByName(vethName)
-	if err != nil {
-		return fmt.Errorf("failed to lookup %q: %v", vethName, err)
-	}
-
-	if err := netlink.LinkSetDown(veth); err != nil {
-		return fmt.Errorf("failed to set %q DOWN: %v", vethName, err)
-	}
-
-	if err := netlink.LinkSetName(veth, newVethName); err != nil {
-		return fmt.Errorf("failed to rename veth: %v to %v (%v)", vethName, newVethName, err)
-	}
-
-	if err := netlink.LinkSetUp(veth); err != nil {
-		return fmt.Errorf("failed to set %q UP: %v", vethName, err)
-	}
-
-	return nil
-}
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func getK8sLabels(conf NetConf, k8sargs K8sArgs) (map[string]string, error) {
-	// TODO - add in token auth
-	var cert tls.Certificate
-	tlsConfig := &tls.Config{}
-	var err error
-	if conf.Policy.K8sClientCertificate != "" && conf.Policy.K8sClientKey != "" {
-		// Load client cert and key
-		cert, err = tls.LoadX509KeyPair(conf.Policy.K8sClientCertificate,
-			conf.Policy.K8sClientKey)
-		if err != nil {
-			return nil, err
-		}
-		tlsConfig.Certificates = []tls.Certificate{cert}
-		tlsConfig.BuildNameToCertificate()
-	}
-
-	if conf.Policy.K8sCertificateAuthority != "" {
-		// Load CA cert
-		caCert, err := ioutil.ReadFile("ssl/ca.pem")
-		if err != nil {
-			return nil, err
-		}
-		caCertPool := x509.NewCertPool()
-		caCertPool.AppendCertsFromPEM(caCert)
-		tlsConfig.RootCAs = caCertPool
-	}
-
-	transport := &http.Transport{TLSClientConfig: tlsConfig}
-	client := &http.Client{Transport: transport}
-	apiRoot := conf.Policy.K8sApiRoot
-	if apiRoot == "" {
-		apiRoot = "https://10.100.0.1:443/api/v1"
-	}
-	url := fmt.Sprintf("%s/namespaces/%s/pods/%s", apiRoot,
-		k8sargs.K8S_POD_NAMESPACE, k8sargs.K8S_POD_NAME)
-	resp, err := client.Get(url)
-	//defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	var dat map[string]interface{}
-	if err := json.Unmarshal(body, &dat); err != nil {
-		return nil, err
-	}
-
-	metadata := dat["metadata"].(map[string]interface{})
-	labels := extractLabels(metadata["labels"])
-	labels["calico/k8s_ns"] = k8sargs.K8S_POD_NAMESPACE
-	return labels, nil
-}
-
-func extractLabels(raw_labels interface{}) map[string]string {
-	labels := make(map[string]string)
-	if raw_labels != nil {
-		for key, value := range raw_labels.(map[string]interface{}) {
-			labels[key] = value.(string)
-		}
-	}
-
-	return labels
-}
-
-func validateNetworkName(name string) error {
-	matched, err := regexp.MatchString(`^[a-zA-Z0-9_\.\-]+$`, name)
-	if err != nil {
-		return err
-	}
-	if ! matched {
-		return errors.New("Invalid characters detected in the given network name. " +
-		"Only letters a-z, numbers 0-9, and symbols _.- are supported.")
-	}
-	return nil
-}
-
 func cmdAdd(args *skel.CmdArgs) error {
-	var orchestratorId, workloadID, profileID string
+	var orchestratorID, workloadID, profileID string
 	var labels map[string]string
 	var err error
 
+	// Unmarshall the network config, and perform validation
 	conf := NetConf{}
 	if err := json.Unmarshal(args.StdinData, &conf); err != nil {
 		return fmt.Errorf("failed to load netconf: %v", err)
 	}
 
-	if err := validateNetworkName(conf.Name); err != nil {
+	if err := ValidateNetworkName(conf.Name); err != nil {
 		return err
 	}
 
@@ -249,63 +69,67 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 	}
-
+	// Determine if running under k8s by checking the CNI args
 	RunningUnderK8s := string(k8sArgs.K8S_POD_NAMESPACE) != "" && string(k8sArgs.K8S_POD_NAME) != ""
+
+	// Initialize the information required for the calico endpoint based on whether running under k8s or not.
 	if RunningUnderK8s {
 		workloadID = fmt.Sprintf("%s.%s", k8sArgs.K8S_POD_NAMESPACE, k8sArgs.K8S_POD_NAME)
-		orchestratorId = "k8s"
-		labels, err = getK8sLabels(conf, k8sArgs)
+		orchestratorID = "k8s"
+		profileID = fmt.Sprintf("k8s_ns.%s", k8sArgs.K8S_POD_NAMESPACE)
+		labels, err = GetK8sLabels(conf, k8sArgs)
 		if err != nil {
 			return err
 		}
-		profileID = fmt.Sprintf("k8s_ns.%s", k8sArgs.K8S_POD_NAMESPACE)
 	} else {
 		workloadID = args.ContainerID
-		orchestratorId = "cni"
-		labels = map[string]string{}
+		orchestratorID = "cni"
 		profileID = conf.Name
-
-		// Create the profile if needed - name = network_name
-		exists, err := libcalico.ProfileExists(conf.Name, etcd)
-		if err != nil {
-			return err
-		}
-
-		if ! exists {
-			profile := libcalico.Profile{
-				ID:conf.Name,
-				Rules:libcalico.Rules{
-					Inbound:[]libcalico.Rule{libcalico.Rule{Action:"allow", SrcTag:conf.Name}},
-					Outbound:[]libcalico.Rule{libcalico.Rule{Action:"allow"}}},
-				Tags:[]string{conf.Name}}
-			if err := profile.Write(etcd); err != nil {
-				return err
-			}
-		}
+		labels = map[string]string{}
 	}
 
-	// Get an existing workload (if one exists). If it's there then the
-	// behavior varies on whether we're running under k8s or not.
-	// Under k8s - TODO
-	// Otherwise - Just add a new profile to the endpoint.
-	found, theendpoint, err := libcalico.GetEndpoint(etcd, libcalico.Workload{Hostname:hostname, OrchestratorID:orchestratorId, WorkloadID:workloadID})
-	var result *types.Result
+	// Get an existing workload/endpoint (if one exists). If it's there then:
+	// Under k8s - This happens when DOcker or hte node restarts. K8s calls CNI with the same details as before.
+	//             Do the networking but no etcd changes should be required.
+	// Otherwise - Don't create the veth or do any networking. Just update the profile on the endpoint
+	//             (creating the profile if required)
+	found, theEndpoint, err := libcalico.GetEndpoint(
+		etcd, libcalico.Workload{
+			Hostname: hostname,
+			OrchestratorID: orchestratorID,
+			WorkloadID: workloadID})
 	if err != nil {
 		return err
 	}
 
+	var result *types.Result
 	if found {
-		// There's an existing endpoint
-		theendpoint.ProfileID = append(theendpoint.ProfileID, profileID)
+		// There's an existing endpoint - no need to create another. Find the IP address from the endpoint
+		// and use that in the response.
+		theEndpoint.ProfileID = append(theEndpoint.ProfileID, profileID)
 		existingIPv4 := types.IPConfig{}
-		theIP := fmt.Sprintf(`{"ip": "%s"}`, theendpoint.IPv4Nets[0])
+		theIP := fmt.Sprintf(`{"ip": "%s"}`, theEndpoint.IPv4Nets[0])
 		err = existingIPv4.UnmarshalJSON([]byte(theIP))
 		if err != nil {
 			return err
 		}
 		result = &types.Result{IP4: &existingIPv4}
+
+		if RunningUnderK8s {
+			// We're assuming that the endpoint is fine and doesn't need to be changed.
+			// However, the veth does need to be recreated since the namespace has been lost.
+			_, err := DoNetworking(args, conf, result)
+			if err != nil {
+				return err
+			}
+		}
 	} else {
-		// run the IPAM plugin and make sure there's an IPv4 address
+		// There's no existing endpoint, so we need to do the following:
+		// 1) Call the configured IPAM plugin to get IP address(es)
+		// 2) Create the veth, configuring it on both the host and container namespace.
+		// 3) Configure the calico veth in etcd.
+
+		// 1) run the IPAM plugin and make sure there's an IPv4 address
 		result, err = ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
 		if err != nil {
 			return err
@@ -314,32 +138,66 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return errors.New("IPAM plugin returned missing IPv4 config")
 		}
 
-		hostVethName, _, err := setupContainerVeth(args.Netns, args.IfName, conf.MTU, result)
+		// 2) Set up the veth
+		hostVethName, err := DoNetworking(args, conf, result)
 		if err != nil {
 			return err
 		}
 
-		// Select the first 11 characters of the containerID for the host veth
-		newHostVethName := "cali" + args.ContainerID[:min(11, len(args.ContainerID))]
-		if err = setupHostVeth(hostVethName, newHostVethName); err != nil {
-			return err
-		}
-
-		// Create the endpoint
-		theendpoint = libcalico.Endpoint{
+		// 3) Create the endpoint
+		theEndpoint = libcalico.Endpoint{
 			Hostname:hostname,
-			OrchestratorID:orchestratorId,
+			OrchestratorID:orchestratorID,
 			WorkloadID:workloadID,
 			Mac: "EE:EE:EE:EE:EE:EE",
 			State:"active",
-			Name:newHostVethName,
+			Name:hostVethName,
 			IPv4Nets:[]string{result.IP4.IP.String()},
 			ProfileID:[]string{profileID},
 			IPv6Nets:[]string{},
 			Labels:labels}
 	}
-	if err := theendpoint.Write(etcd); err != nil {
+
+	// Write the endpoint object (either the newly created one, or the updated one with a new profileID).
+	if err := theEndpoint.Write(etcd); err != nil {
 		return err
+	}
+
+	// Handle profile creation.
+	// If Kubernetes is being used then profiles only need to be created if there is no policy block in the network
+	// config. If there is a policy block then "proper" policy is being used and the policy controller handles
+	// profile creation.
+	if ! RunningUnderK8s || conf.Policy == nil {
+		// Start by checking if the profile already exists. If it already exists then there is no work to do (the CNI plugin never updates a profile).
+		exists, err := libcalico.ProfileExists(conf.Name, etcd)
+		if err != nil {
+			return err
+		}
+
+		if ! exists {
+			// The profile doesn't exist so needs to be created. The rules vary depending on whether k8s is being used.
+			// Under k8s (without full policy support) the rule is very permissive and allows all traffic.
+			// Otherwise, incoming traffic is only allowed from profiles with the same tag.
+			k8sInboundRule := []libcalico.Rule{libcalico.Rule{Action:"allow"}}
+			tagInboundRule := []libcalico.Rule{libcalico.Rule{Action:"allow", SrcTag:conf.Name}}
+
+			var inboundRule []libcalico.Rule
+			if RunningUnderK8s {
+				inboundRule = k8sInboundRule
+			} else {
+				inboundRule = tagInboundRule
+			}
+
+			profile := libcalico.Profile{
+				ID:conf.Name,
+				Rules:libcalico.Rules{
+					Inbound: inboundRule,
+					Outbound:[]libcalico.Rule{libcalico.Rule{Action:"allow"}}},
+				Tags:[]string{conf.Name}}
+			if err := profile.Write(etcd); err != nil {
+				return err
+			}
+		}
 	}
 
 	return result.Print()
@@ -392,31 +250,6 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 
 	return ipam.ExecDel(conf.IPAM.Type, args.StdinData)
-}
-
-func LoadArgs(args string, container *K8sArgs) error {
-	if args == "" {
-		return nil
-	}
-
-	pairs := strings.Split(args, ";")
-	for _, pair := range pairs {
-		kv := strings.Split(pair, "=")
-		if len(kv) != 2 {
-			return fmt.Errorf("ARGS: invalid pair %q", pair)
-		}
-		keyString := kv[0]
-		valueString := kv[1]
-		switch {
-		case keyString == "K8S_POD_INFRA_CONTAINER_ID":
-			container.K8S_POD_INFRA_CONTAINER_ID = valueString
-		case keyString == "K8S_POD_NAMESPACE":
-			container.K8S_POD_NAMESPACE = valueString
-		case keyString == "K8S_POD_NAME":
-			container.K8S_POD_NAME = valueString
-		}
-	}
-	return nil
 }
 
 func main() {
