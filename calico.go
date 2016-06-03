@@ -30,6 +30,7 @@ import (
 	"github.com/projectcalico/libcalico/lib"
 	. "github.com/projectcalico/calico-cni/utils"
 	"flag"
+	"net"
 )
 
 var hostname string
@@ -131,6 +132,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		// 3) Configure the calico veth in etcd.
 
 		// 1) run the IPAM plugin and make sure there's an IPv4 address
+		AddIgnoreUnknownArgs()
 		result, err = ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
 		if err != nil {
 			return err
@@ -169,6 +171,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// config. If there is a policy block then "proper" policy is being used and the policy controller handles
 	// profile creation.
 	if ! RunningUnderK8s || conf.Policy == nil {
+		//TODO - this is the wrong test. It should be on the policy type
 		// Start by checking if the profile already exists. If it already exists then there is no work to do (the CNI plugin never updates a profile).
 		exists, err := libcalico.ProfileExists(conf.Name, etcd)
 		if err != nil {
