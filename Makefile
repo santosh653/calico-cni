@@ -7,7 +7,7 @@ SRCFILES=calico.go
 #LOCAL_IP_ENV?=$(shell docker-machine ip)
 LOCAL_IP_ENV?=$(ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
 
-K8S_VERSION=1.2.3
+K8S_VERSION=1.2.4
 
 default: all
 all: binary test
@@ -106,7 +106,7 @@ kubectl:
 dist/calicoctl:
 	mkdir -p dist
 	sudo chmod a+w dist
-	curl -o dist/calicoctl -L https://github.com/projectcalico/calico-containers/releases/download/v0.17.0/calicoctl
+	curl -o dist/calicoctl -L https://github.com/projectcalico/calico-containers/releases/download/v0.19.0/calicoctl
 	chmod +x dist/calicoctl
 
 glide:
