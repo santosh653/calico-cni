@@ -57,7 +57,8 @@ run-etcd:
 
 run-kubernetes-master: stop-kubernetes-master run-etcd  kubectl # binary dist/calicoctl
 	mkdir -p net.d
-	echo '{"name": "calico-k8s-network","type": "calico","etcd_authority": "10.0.2.15:2379","log_level": "debug","policy": {"type": "k8s","k8s_api_root": "http://127.0.0.1:8080/api/v1/"},"ipam": {"type": "host-local", "subnet": "10.0.0.0/8"}}' >net.d/10-calico.conf
+	#echo '{"name": "calico-k8s-network","type": "calico","etcd_authority": "10.0.2.15:2379","log_level": "debug","policy": {"type": "k8s","k8s_api_root": "http://127.0.0.1:8080/api/v1/"},"ipam": {"type": "host-local", "subnet": "10.0.0.0/8"}}' >net.d/10-calico.conf
+	echo '{"name": "calico-k8s-network","type": "calico","etcd_authority": "10.0.2.15:2379","log_level": "debug","policy": {"type": "k8s","k8s_api_root": "http://127.0.0.1:8080"},"ipam": {"type": "host-local", "subnet": "10.0.0.0/8"}}' >net.d/10-calico.conf
 	# Run the kubelet which will launch the master components in a pod.
 	docker run \
 		--volume=/:/rootfs:ro \
@@ -116,7 +117,8 @@ glide:
 vendor: glide
 	./glide up -strip-vcs -strip-vendor --update-vendored --all-dependencies
 
-dist/calico: $(shell find vendor -type f) flannel_build.created calico.go
+#$(shell find vendor -type f)
+dist/calico: flannel_build.created calico.go
 	mkdir -p dist
 #	docker run --rm \
 #	-v ${PWD}/dist:/mnt/artifacts \
@@ -125,9 +127,9 @@ dist/calico: $(shell find vendor -type f) flannel_build.created calico.go
 #		go build -o /mnt/artifacts/calico -ldflags "-extldflags -static \
 #		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" calico.go; \
 #		chown -R $(shell id -u):$(shell id -u) /mnt/artifacts'
-	go build -o dist/calico -ldflags "-extldflags -static -X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
-
-dist/calico-ipam: $(shell find vendor -type f) flannel_build.created ipam/calico-ipam.go
+	time go build -v -o dist/calico -ldflags "-extldflags -static -X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
+#$(shell find vendor -type f)
+dist/calico-ipam:  flannel_build.created ipam/calico-ipam.go
 	mkdir -p dist
 	docker run --rm \
 	-v ${PWD}/dist:/mnt/artifacts \

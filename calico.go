@@ -272,8 +272,10 @@ func cmdDel(args *skel.CmdArgs) error {
 var VERSION string
 
 func main() {
-	version := flag.Bool("v", false, "Display version")
-	flag.Parse()
+	flagSet := flag.NewFlagSet("Calico", flag.ExitOnError)
+
+	version := flagSet.Bool("v", false, "Display version")
+	flagSet.Parse(os.Args[1:])
 	if *version {
 		fmt.Println(VERSION)
 		os.Exit(0)
