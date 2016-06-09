@@ -205,6 +205,8 @@ func cmdAdd(args *skel.CmdArgs) error {
 			OrchestratorID: orchestratorID,
 			WorkloadID: workloadID})
 
+	fmt.Fprintf(os.Stderr, "Calico CNI checking for existing endpoint. endpoint=%v\n", theEndpoint)
+
 	if err != nil {
 		return err
 	}
@@ -217,7 +219,11 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 	} else {
 		result, theEndpoint, err = cmdAddNonK8s(args, conf, theEndpoint)
+				if err != nil {
+			return err
+		}
 	}
+
 	theEndpoint.OrchestratorID = orchestratorID
 	theEndpoint.WorkloadID = workloadID
 	theEndpoint.Hostname = hostname
@@ -226,7 +232,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	theEndpoint.IPv6Nets = []string{}
 	theEndpoint.IPv4Nets = []string{result.IP4.IP.String()}
 
-
+	fmt.Fprintf(os.Stderr, "Calico CNI using IPv4=%s\n", result.IP4.IP.String())
 	// Write the endpoint object (either the newly created one, or the updated one with a new profileID).
 	if err := theEndpoint.Write(etcd); err != nil {
 		return err
@@ -250,6 +256,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			// Otherwise, incoming traffic is only allowed from profiles with the same tag.
 			k8sInboundRule := []libcalico.Rule{libcalico.Rule{Action:"allow"}}
 			tagInboundRule := []libcalico.Rule{libcalico.Rule{Action:"allow", SrcTag:conf.Name}}
+			fmt.Fprintf(os.Stderr, "Calico CNI creating profile. profile=%s\n", conf.Name)
 
 			var inboundRule []libcalico.Rule
 			if RunningUnderK8s {

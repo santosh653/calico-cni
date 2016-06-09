@@ -23,12 +23,12 @@ plugin: dist/calico
 ipam: dist/calico-ipam
 
 # Run the unit tests.
-ut: dist/calico
+ut: dist/calico dist/calico-ipam
 	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=/home/tom/go /home/tom/go/bin/ginkgo
 
 
 # Run the unit tests, watching for changes.
-ut-watch:
+ut-watch: dist/calico dist/calico-ipam
 	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=/home/tom/go /home/tom/go/bin/ginkgo watch
 
 clean:
@@ -103,8 +103,8 @@ vendor:
 dist/calico: calico.go
 	go build -v --tags "$(BUILD_TAGS)" -o dist/calico -ldflags "-extldflags -static -X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
 
-dist/calico-ipam: calico-ipam.go
-		go build -o /mnt/artifacts/calico-ipam -ldflags "-extldflags -static \
+dist/calico-ipam: ipam/calico-ipam.go
+		go build -o dist/calico-ipam -ldflags "-extldflags -static \
 		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" ipam/calico-ipam.go; \
 
 
