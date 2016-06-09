@@ -50,7 +50,7 @@ func CreateContainer(netconf string) (container_id string, session *gexec.Sessio
 func DeleteContainer(netconf, container_id string) (session *gexec.Session, err error) {
 	netnspath := "/var/run/netns/" + container_id
 	// Set up the env for running the CNI plugin
-	cni_env := fmt.Sprintf("CNI_COMMAND=DEL CNI_CONTAINERID=%s CNI_NETNS=%s CNI_IFNAME=eth0 CNI_PATH=../dist", container_id, netnspath)
+	cni_env := fmt.Sprintf("CNI_COMMAND=DEL CNI_CONTAINERID=%s CNI_NETNS=%s CNI_IFNAME=eth0 CNI_PATH=dist", container_id, netnspath)
 
 	// Run the CNI plugin passing in the supplied netconf
 	subProcess := exec.Command("bash", "-c", fmt.Sprintf("%s dist/%s", cni_env, os.Getenv("PLUGIN")), netconf)
