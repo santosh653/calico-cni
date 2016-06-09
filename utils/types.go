@@ -18,3 +18,9 @@ type NetConf struct {
 	EtcdEndpoints string `json:"etcd_endpoints"`
 	Policy        *Policy `json:"policy"`
 }
+
+type K8sArgs struct {
+	K8S_POD_NAME               string
+	K8S_POD_NAMESPACE          string
+	K8S_POD_INFRA_CONTAINER_ID string
+}

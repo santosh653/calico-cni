@@ -44,7 +44,7 @@ func init() {
 	hostname, _ = os.Hostname()
 }
 
-func cmdAddK8s(args *skel.CmdArgs, k8sArgs K8sArgs, conf NetConf, theEndpoint *libcalico.Endpoint) (*types.Result, error) {
+func cmdAddK8s(args *skel.CmdArgs, k8sArgs K8sArgs, conf NetConf, theEndpoint *libcalico.Endpoint) (*types.Result, *libcalico.Endpoint, error) {
 	var err error
 	var result *types.Result
 
@@ -57,14 +57,14 @@ func cmdAddK8s(args *skel.CmdArgs, k8sArgs K8sArgs, conf NetConf, theEndpoint *l
 		// and use that in the response.
 		result, err = createResultFromIP(theEndpoint.IPv4Nets[0])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// We're assuming that the endpoint is fine and doesn't need to be changed.
 		// However, the veth does need to be recreated since the namespace has been lost.
 		_, err := DoNetworking(args, conf, result)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		// TODO - what if labels changed during the restart?
 
@@ -77,32 +77,33 @@ func cmdAddK8s(args *skel.CmdArgs, k8sArgs K8sArgs, conf NetConf, theEndpoint *l
 		// 1) run the IPAM plugin and make sure there's an IPv4 address
 		result, err = ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if result.IP4 == nil {
-			return nil, errors.New("IPAM plugin returned missing IPv4 config")
+			return nil, nil, errors.New("IPAM plugin returned missing IPv4 config")
 		}
 
 		// 2) Set up the veth
 		hostVethName, err := DoNetworking(args, conf, result)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// 3) Update the endpoint
 		labels, err := GetK8sLabels(conf, k8sArgs)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		theEndpoint = &libcalico.Endpoint{}
 		theEndpoint.Name = hostVethName
 		theEndpoint.Labels = labels
 		theEndpoint.ProfileID = []string{profileID}
 	}
 
-	return result, nil
+	return result, theEndpoint, nil
 }
 
-func cmdAddNonK8s(args *skel.CmdArgs, conf NetConf, theEndpoint *libcalico.Endpoint) (*types.Result, error) {
+func cmdAddNonK8s(args *skel.CmdArgs, conf NetConf, theEndpoint *libcalico.Endpoint) (*types.Result, *libcalico.Endpoint, error) {
 	var err error
 	var result *types.Result
 
@@ -116,7 +117,7 @@ func cmdAddNonK8s(args *skel.CmdArgs, conf NetConf, theEndpoint *libcalico.Endpo
 		theEndpoint.ProfileID = append(theEndpoint.ProfileID, profileID)
 		result, err = createResultFromIP(theEndpoint.IPv4Nets[0])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
 		// There's no existing endpoint, so we need to do the following:
@@ -127,24 +128,25 @@ func cmdAddNonK8s(args *skel.CmdArgs, conf NetConf, theEndpoint *libcalico.Endpo
 		// 1) run the IPAM plugin and make sure there's an IPv4 address
 		result, err = ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if result.IP4 == nil {
-			return nil, errors.New("IPAM plugin returned missing IPv4 config")
+			return nil, nil, errors.New("IPAM plugin returned missing IPv4 config")
 		}
 
 		// 2) Set up the veth
 		hostVethName, err := DoNetworking(args, conf, result)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// 3) Update the endpoint
+		theEndpoint = &libcalico.Endpoint{}
 		theEndpoint.Name = hostVethName
 		theEndpoint.Labels = map[string]string{} //TODO is this needed?
 		theEndpoint.ProfileID = []string{profileID}
 	}
-	return result, nil
+	return result, theEndpoint, nil
 }
 
 func createResultFromIP(ip string) (*types.Result, error) {
@@ -209,12 +211,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	var result *types.Result
 	if RunningUnderK8s {
-		result, err = cmdAddK8s(args, k8sArgs, conf, theEndpoint)
+		result, theEndpoint, err = cmdAddK8s(args, k8sArgs, conf, theEndpoint)
 		if err != nil {
 			return err
 		}
 	} else {
-		result, err = cmdAddNonK8s(args, conf, theEndpoint)
+		result, theEndpoint, err = cmdAddNonK8s(args, conf, theEndpoint)
 	}
 	theEndpoint.OrchestratorID = orchestratorID
 	theEndpoint.WorkloadID = workloadID

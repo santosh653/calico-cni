@@ -13,6 +13,18 @@ import (
 	"github.com/containernetworking/cni/pkg/types"
 )
 
+// Some ideas for more tests
+// Test that both etcd_endpoints and etcd_authity can be used
+// Test k8s
+// test bad network name
+// badly formatted netconf
+// vary the MTU
+// Existing endpoint
+
+
+//var _ = Describe("CalicoCniIpam", func() {
+//	Describe("Run Calico CNI IPAM plugin", func() {
+//})
 
 
 var _ = Describe("CalicoCni", func() {

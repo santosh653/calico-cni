@@ -1,7 +1,6 @@
 package main
 
 import (
-
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
 	"net"
@@ -16,9 +15,9 @@ func main() {
 
 // IPAMConfig represents the IP related network configuration.
 type IPAMConfig struct {
-	Name       string
-	Type       string        `json:"type"`
-	Args       *IPAMArgs     `json:"-"`
+	Name string
+	Type string        `json:"type"`
+	Args *IPAMArgs     `json:"-"`
 }
 
 type IPAMArgs struct {
@@ -31,7 +30,6 @@ type Net struct {
 	IPAM *IPAMConfig `json:"ipam"`
 }
 
-// NewIPAMConfig creates a NetworkConfig from the given network name.
 func LoadIPAMConfig(bytes []byte, args string) (*IPAMConfig, error) {
 	n := Net{}
 	if err := json.Unmarshal(bytes, &n); err != nil {
@@ -56,9 +54,7 @@ func LoadIPAMConfig(bytes []byte, args string) (*IPAMConfig, error) {
 	return n.IPAM, nil
 }
 
-
 func cmdAdd(args *skel.CmdArgs) error {
-	//ipamConf, err := LoadIPAMConfig(args.StdinData, args.Args)
 	_, err := LoadIPAMConfig(args.StdinData, args.Args)
 	if err != nil {
 		return err
@@ -69,12 +65,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
+	//TODO ...
 	_, pool, _ := net.ParseCIDR("192.168.0.0/16")
 
-	addresses, _, _ := ipamClient.AutoAssign(1,0,"",map[string]string{}, nil, pool, nil)
+	addresses, _, _ := ipamClient.AutoAssign(1, 0, "", map[string]string{}, nil, pool, nil)
 
 	ipNetwork := net.IPNet{IP: addresses[0], Mask:net.CIDRMask(32, 32)}
-	// ipamConf.Args.IP
 
 	r := &types.Result{
 		IP4: &types.IPConfig{IP:ipNetwork},
@@ -87,6 +83,8 @@ func cmdDel(args *skel.CmdArgs) error {
 	if err != nil {
 		return err
 	}
+
+	//TODO  - need to release the address
 
 
 	return nil

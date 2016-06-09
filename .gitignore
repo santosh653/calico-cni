@@ -1,7 +1,3 @@
 dist
 .idea
 *~
-*.created
-glide
-kubectl
-net.d

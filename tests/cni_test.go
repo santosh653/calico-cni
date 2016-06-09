@@ -99,12 +99,7 @@ func TestSingleNetworkHostLocal(t *testing.T) {
 
 }
 
-// Test that both etcd_endpoints and etcd_authity can be used
-// Test k8s
-// test bad network name
-// badly formatted netconf
-// vary the MTU
-// Existing endpoint
+
 
 
 func RunIpam(netconf string) string {

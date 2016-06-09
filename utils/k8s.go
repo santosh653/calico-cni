@@ -1,26 +1,13 @@
+// +build k8s
+
 package utils
 
 import (
-	//"crypto/tls"
-	//"crypto/x509"
-	//"fmt"
-	//"encoding/json"
-	//"io/ioutil"
-	//"net/http"
-	//"log"
-	//"github.com/coreos/etcd/etcdserver/api"
-	//k8sApi "k8s.io/kubernetes/pkg/api"
 	k8sClient "k8s.io/kubernetes/pkg/client/unversioned"
 	k8sRestClient "k8s.io/kubernetes/pkg/client/restclient"
 	"fmt"
 	"os"
 )
-
-type K8sArgs struct {
-	K8S_POD_NAME               string
-	K8S_POD_NAMESPACE          string
-	K8S_POD_INFRA_CONTAINER_ID string
-}
 
 func GetK8sLabels(conf NetConf, k8sargs K8sArgs) (map[string]string, error) {
 	apiRoot := conf.Policy.K8sApiRoot
