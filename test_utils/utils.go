@@ -1,15 +1,16 @@
 package test_utils
 
 import (
-	"os/exec"
 	"bytes"
-	"io"
 	"fmt"
+	"io"
 	"os"
-	"github.com/dchest/uniuri"
-	"github.com/onsi/gomega/gexec"
-	"github.com/onsi/ginkgo"
+	"os/exec"
 	"strings"
+
+	"github.com/dchest/uniuri"
+	"github.com/onsi/ginkgo"
+	"github.com/onsi/gomega/gexec"
 )
 
 func RunIpam(netconf string) string {
@@ -131,6 +132,3 @@ func EtcdGetCommand(path string) string {
 	//return "etcdctl", []string{"--endpoints", fmt.Sprintf("http://%s:2379", os.Getenv("ETCD_IP")), "get", path}
 	return fmt.Sprintf("etcdctl --endpoints http://%s:2379 get %s", os.Getenv("ETCD_IP"), path)
 }
-
-
-

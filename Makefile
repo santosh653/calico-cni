@@ -94,11 +94,29 @@ dist/calicoctl:
 	curl -o dist/calicoctl -L https://github.com/projectcalico/calico-containers/releases/download/v$(CALICO_NODE_VERSION)/calicoctl
 	chmod +x dist/calicoctl
 
-glide:
-	go install github.com/Masterminds/glide
+update-tools:
+	go get -u github.com/Masterminds/glide
+	go get -u github.com/kisielk/errcheck
+	go get -u golang.org/x/tools/cmd/goimports
+	go get -u github.com/golang/lint/golint
 
-vendor:
+vendor-up:
 	glide up -strip-vcs -strip-vendor --update-vendored --all-dependencies
+
+static-checks:
+	# Format the code and clean up imports
+	goimports -w *.go utils/*.go ipam/*.go  test_utils/*.go
+
+	# Check for coding mistake and missing error handling
+	go vet -x $(glide nv)
+	errcheck . ./ipam/... ./utils/...
+
+	# Check code style
+	golint calico.go
+	golint utils
+	golint ipam
+
+
 
 dist/calico: calico.go
 	go build -v --tags "$(BUILD_TAGS)" -o dist/calico -ldflags "-extldflags -static -X main.VERSION=$(shell git describe --tags --dirty)" calico.go;

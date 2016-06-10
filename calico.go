@@ -23,7 +23,6 @@ import (
 	"github.com/vishvananda/netlink"
 
 	"flag"
-	"net"
 
 	"github.com/containernetworking/cni/pkg/ip"
 	"github.com/containernetworking/cni/pkg/ipam"
@@ -163,9 +162,11 @@ func createResultFromIP(ip string) (*types.Result, error) {
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
-	AddIgnoreUnknownArgs()
+	err := AddIgnoreUnknownArgs()
+	if err != nil {
+		return err
+	}
 	var orchestratorID, workloadID string
-	var err error
 
 	// Unmarshall the network config, and perform validation
 	conf := NetConf{}
@@ -289,7 +290,10 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 
 	// Always try to release the address
-	AddIgnoreUnknownArgs()
+	err := AddIgnoreUnknownArgs()
+	if err != nil {
+		return err
+	}
 	if err := ipam.ExecDel(n.IPAM.Type, args.StdinData); err != nil {
 		return err
 	}
@@ -329,10 +333,9 @@ func cmdDel(args *skel.CmdArgs) error {
 
 	// Only try to delete the device if a namespace was passed in
 	if args.Netns != "" {
-		var ipn *net.IPNet
 		err := ns.WithNetNSPath(args.Netns, func(_ ns.NetNS) error {
 			var err error
-			ipn, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
+			_, err = ip.DelLinkByNameAddr(args.IfName, netlink.FAMILY_V4)
 			return err
 		})
 
@@ -350,7 +353,11 @@ func main() {
 	flagSet := flag.NewFlagSet("Calico", flag.ExitOnError)
 
 	version := flagSet.Bool("v", false, "Display version")
-	flagSet.Parse(os.Args[1:])
+	err := flagSet.Parse(os.Args[1:])
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 	if *version {
 		fmt.Println(VERSION)
 		os.Exit(0)

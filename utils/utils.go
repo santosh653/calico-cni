@@ -53,12 +53,12 @@ func ValidateNetworkName(name string) error {
 	return nil
 }
 
-func AddIgnoreUnknownArgs() {
+func AddIgnoreUnknownArgs() error {
 	// Append the 'IgnoreUnknown=1' option to CNI_ARGS before calling the IPAM plugin. Otherwise, it will
 	// complain about the Kubernetes arguments. See https://github.com/kubernetes/kubernetes/pull/24983
 	cniArgs := "IgnoreUnknown=1"
 	if os.Getenv("CNI_ARGS") != "" {
 		cniArgs = fmt.Sprintf("%s;%s", cniArgs, os.Getenv("CNI_ARGS"))
 	}
-	os.Setenv("CNI_ARGS", cniArgs)
+	return os.Setenv("CNI_ARGS", cniArgs)
 }
