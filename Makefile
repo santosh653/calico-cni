@@ -23,7 +23,8 @@ ipam: dist/calico-ipam
 
 # Run the unit tests.
 test: dist/calico dist/calico-ipam run-etcd
-	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=/home/tom/go /home/tom/go/bin/ginkgo
+	go get github.com/onsi/ginkgo/ginkgo
+	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=$(GOPATH) $(shell which ginkgo)
 
 
 # Run the unit tests, watching for changes.

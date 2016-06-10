@@ -4,6 +4,9 @@ general:
 machine:
   services:
     - docker
+dependencies:
+  override:
+    - echo "Don't do anything"
 test:
   override:
     - make
