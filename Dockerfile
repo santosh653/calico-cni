@@ -11,4 +11,6 @@ RUN curl -o glibc.apk -L "https://github.com/andyshinn/alpine-pkg-glibc/releases
   /usr/glibc-compat/sbin/ldconfig /lib /usr/glibc/usr/lib && \
   echo 'hosts: files mdns4_minimal [NOTFOUND=return] dns mdns4' >> /etc/nsswitch.conf && \
   rm -f glibc.apk glibc-bin.apk
+
+RUN go get github.com/onsi/ginkgo/ginkgo
 WORKDIR /go/src/github.com/projectcalico/calico-cni

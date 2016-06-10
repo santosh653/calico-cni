@@ -5,7 +5,7 @@
 SRCFILES=calico.go
 # TODO - make the IP docker-machine compatible
 #LOCAL_IP_ENV?=$(shell docker-machine ip)
-LOCAL_IP_ENV?=$(ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
+LOCAL_IP_ENV?=$(shell ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
 
 K8S_VERSION=1.2.4
 CALICO_NODE_VERSION=0.19.0
@@ -26,6 +26,17 @@ test: dist/calico dist/calico-ipam run-etcd
 	go get github.com/onsi/ginkgo/ginkgo
 	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=$(GOPATH) $(shell which ginkgo)
 
+test_container.created: Dockerfile
+	docker build -t test_container .
+	touch test_container.created
+
+test-containerized: dist/calico dist/host-local run-etcd test_container.created
+	docker run -ti --rm --privileged --net=host \
+	--hostname cnitests \
+	-e ETCD_IP=$(LOCAL_IP_ENV) \
+	-e PLUGIN=calico \
+	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
+	test_container bash -c 'ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico ginkgo'
 
 # Run the unit tests, watching for changes.
 ut-watch: dist/calico dist/calico-ipam
@@ -40,7 +51,7 @@ run-etcd:
 	docker run --detach \
 	--net=host \
 	--name calico-etcd quay.io/coreos/etcd:v2.3.6 \
-	--advertise-client-urls "http://127.0.0.1:2379,http://127.0.0.1:4001" \
+	--advertise-client-urls "http://$(LOCAL_IP_ENV):2379,http://127.0.0.1:2379,http://$(LOCAL_IP_ENV):4001,http://127.0.0.1:4001" \
 	--listen-client-urls "http://0.0.0.0:2379,http://0.0.0.0:4001"
 
 # TODO - sort out deps
