@@ -1,13 +1,14 @@
 package utils
 
 import (
-	"github.com/containernetworking/cni/pkg/ns"
-	"net"
 	"fmt"
-	"github.com/containernetworking/cni/pkg/types"
+	"net"
+
 	"github.com/containernetworking/cni/pkg/ip"
-	"github.com/vishvananda/netlink"
+	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/containernetworking/cni/pkg/skel"
+	"github.com/containernetworking/cni/pkg/types"
+	"github.com/vishvananda/netlink"
 )
 
 var slash32 = net.CIDRMask(32, 32)
@@ -51,7 +52,7 @@ func setupContainerVeth(netns, ifName string, mtu int, res *types.Result) (strin
 		}
 
 		address := &netlink.Addr{Label: "", IPNet: &net.IPNet{
-			IP:   res.IP4.IP.IP, Mask: slash32} }
+			IP: res.IP4.IP.IP, Mask: slash32}}
 		if err = netlink.AddrAdd(contVeth, address); err != nil {
 			return fmt.Errorf("failed to add IP addr to %q: %v", ifName, err)
 		}

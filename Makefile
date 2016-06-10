@@ -105,8 +105,8 @@ dist/calico: calico.go
 
 dist/calico-ipam: ipam/calico-ipam.go
 		go build -o dist/calico-ipam -ldflags "-extldflags -static \
-		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" ipam/calico-ipam.go; \
-
+		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" \
+		ipam/calico-ipam.go;
 
 go_test: dist/calico dist/host-local dist/calipo
 	docker run -ti --rm --privileged \

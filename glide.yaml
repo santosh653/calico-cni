@@ -16,7 +16,3 @@ import:
 - package: github.com/vishvananda/netlink
 - package: github.com/dchest/uniuri
 - package: github.com/onsi/gomega
-- package: github.com/stretchr/testify
-- package: github.com/kubernetes/kubernetes
-  subpackages:
-  - pkg/api

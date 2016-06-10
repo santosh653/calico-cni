@@ -1,11 +1,11 @@
 package utils
 
 import (
-	"strings"
-	"fmt"
-	"regexp"
 	"errors"
+	"fmt"
 	"os"
+	"regexp"
+	"strings"
 )
 
 func Min(a, b int) int {
@@ -46,9 +46,9 @@ func ValidateNetworkName(name string) error {
 	if err != nil {
 		return err
 	}
-	if ! matched {
+	if !matched {
 		return errors.New("Invalid characters detected in the given network name. " +
-		"Only letters a-z, numbers 0-9, and symbols _.- are supported.")
+			"Only letters a-z, numbers 0-9, and symbols _.- are supported.")
 	}
 	return nil
 }

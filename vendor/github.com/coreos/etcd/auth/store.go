@@ -30,6 +30,8 @@ import (
 
 var (
 	enableFlagKey = []byte("authEnabled")
+	authEnabled   = []byte{1}
+	authDisabled  = []byte{0}
 
 	authBucketName      = []byte("auth")
 	authUsersBucketName = []byte("authUsers")
@@ -37,17 +39,26 @@ var (
 
 	plog = capnslog.NewPackageLogger("github.com/coreos/etcd", "auth")
 
-	ErrUserAlreadyExist = errors.New("auth: user already exists")
-	ErrUserNotFound     = errors.New("auth: user not found")
-	ErrRoleAlreadyExist = errors.New("auth: role already exists")
-	ErrRoleNotFound     = errors.New("auth: role not found")
-	ErrAuthFailed       = errors.New("auth: authentication failed, invalid user ID or password")
-	ErrPermissionDenied = errors.New("auth: permission denied")
+	ErrRootUserNotExist     = errors.New("auth: root user does not exist")
+	ErrRootRoleNotExist     = errors.New("auth: root user does not have root role")
+	ErrUserAlreadyExist     = errors.New("auth: user already exists")
+	ErrUserNotFound         = errors.New("auth: user not found")
+	ErrRoleAlreadyExist     = errors.New("auth: role already exists")
+	ErrRoleNotFound         = errors.New("auth: role not found")
+	ErrAuthFailed           = errors.New("auth: authentication failed, invalid user ID or password")
+	ErrPermissionDenied     = errors.New("auth: permission denied")
+	ErrRoleNotGranted       = errors.New("auth: role is not granted to the user")
+	ErrPermissionNotGranted = errors.New("auth: permission is not granted to the role")
+)
+
+const (
+	rootUser = "root"
+	rootRole = "root"
 )
 
 type AuthStore interface {
 	// AuthEnable turns on the authentication feature
-	AuthEnable()
+	AuthEnable() error
 
 	// AuthDisable turns off the authentication feature
 	AuthDisable()
@@ -70,14 +81,29 @@ type AuthStore interface {
 	// UserChangePassword changes a password of a user
 	UserChangePassword(r *pb.AuthUserChangePasswordRequest) (*pb.AuthUserChangePasswordResponse, error)
 
-	// UserGrant grants a role to the user
-	UserGrant(r *pb.AuthUserGrantRequest) (*pb.AuthUserGrantResponse, error)
+	// UserGrantRole grants a role to the user
+	UserGrantRole(r *pb.AuthUserGrantRoleRequest) (*pb.AuthUserGrantRoleResponse, error)
+
+	// UserGet gets the detailed information of a user
+	UserGet(r *pb.AuthUserGetRequest) (*pb.AuthUserGetResponse, error)
+
+	// UserRevokeRole revokes a role of a user
+	UserRevokeRole(r *pb.AuthUserRevokeRoleRequest) (*pb.AuthUserRevokeRoleResponse, error)
 
 	// RoleAdd adds a new role
 	RoleAdd(r *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse, error)
 
-	// RoleGrant grants a permission to a role
-	RoleGrant(r *pb.AuthRoleGrantRequest) (*pb.AuthRoleGrantResponse, error)
+	// RoleGrantPermission grants a permission to a role
+	RoleGrantPermission(r *pb.AuthRoleGrantPermissionRequest) (*pb.AuthRoleGrantPermissionResponse, error)
+
+	// RoleGet gets the detailed information of a role
+	RoleGet(r *pb.AuthRoleGetRequest) (*pb.AuthRoleGetResponse, error)
+
+	// RoleRevokePermission gets the detailed information of a role
+	RoleRevokePermission(r *pb.AuthRoleRevokePermissionRequest) (*pb.AuthRoleRevokePermissionResponse, error)
+
+	// RoleDelete gets the detailed information of a role
+	RoleDelete(r *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDeleteResponse, error)
 
 	// UsernameFromToken gets a username from the given Token
 	UsernameFromToken(token string) (string, bool)
@@ -86,39 +112,56 @@ type AuthStore interface {
 	IsPutPermitted(header *pb.RequestHeader, key string) bool
 
 	// IsRangePermitted checks range permission of the user
-	IsRangePermitted(header *pb.RequestHeader, key string) bool
+	IsRangePermitted(header *pb.RequestHeader, key, rangeEnd string) bool
+
+	// IsAdminPermitted checks admin permission of the user
+	IsAdminPermitted(username string) bool
 }
 
 type authStore struct {
 	be        backend.Backend
 	enabled   bool
 	enabledMu sync.RWMutex
+
+	rangePermCache map[string]*unifiedRangePermissions // username -> unifiedRangePermissions
 }
 
-func (as *authStore) AuthEnable() {
-	value := []byte{1}
-
+func (as *authStore) AuthEnable() error {
 	b := as.be
 	tx := b.BatchTx()
 	tx.Lock()
-	tx.UnsafePut(authBucketName, enableFlagKey, value)
-	tx.Unlock()
-	b.ForceCommit()
+	defer func() {
+		tx.Unlock()
+		b.ForceCommit()
+	}()
+
+	u := getUser(tx, rootUser)
+	if u == nil {
+		return ErrRootUserNotExist
+	}
+
+	if !hasRootRole(u) {
+		return ErrRootRoleNotExist
+	}
+
+	tx.UnsafePut(authBucketName, enableFlagKey, authEnabled)
 
 	as.enabledMu.Lock()
 	as.enabled = true
 	as.enabledMu.Unlock()
 
+	as.rangePermCache = make(map[string]*unifiedRangePermissions)
+
 	plog.Noticef("Authentication enabled")
+
+	return nil
 }
 
 func (as *authStore) AuthDisable() {
-	value := []byte{0}
-
 	b := as.be
 	tx := b.BatchTx()
 	tx.Lock()
-	tx.UnsafePut(authBucketName, enableFlagKey, value)
+	tx.UnsafePut(authBucketName, enableFlagKey, authDisabled)
 	tx.Unlock()
 	b.ForceCommit()
 
@@ -162,8 +205,21 @@ func (as *authStore) Authenticate(name string, password string) (*pb.Authenticat
 }
 
 func (as *authStore) Recover(be backend.Backend) {
+	enabled := false
 	as.be = be
-	// TODO(mitake): recovery process
+	tx := be.BatchTx()
+	tx.Lock()
+	_, vs := tx.UnsafeRange(authBucketName, enableFlagKey, nil, 0)
+	if len(vs) == 1 {
+		if bytes.Equal(vs[0], authEnabled) {
+			enabled = true
+		}
+	}
+	tx.Unlock()
+
+	as.enabledMu.Lock()
+	as.enabled = enabled
+	as.enabledMu.Unlock()
 }
 
 func (as *authStore) UserAdd(r *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse, error) {
@@ -177,23 +233,17 @@ func (as *authStore) UserAdd(r *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse,
 	tx.Lock()
 	defer tx.Unlock()
 
-	_, vs := tx.UnsafeRange(authUsersBucketName, []byte(r.Name), nil, 0)
-	if len(vs) != 0 {
-		return &pb.AuthUserAddResponse{}, ErrUserAlreadyExist
+	user := getUser(tx, r.Name)
+	if user != nil {
+		return nil, ErrUserAlreadyExist
 	}
 
-	newUser := authpb.User{
+	newUser := &authpb.User{
 		Name:     []byte(r.Name),
 		Password: hashed,
 	}
 
-	marshaledUser, merr := newUser.Marshal()
-	if merr != nil {
-		plog.Errorf("failed to marshal a new user data: %s", merr)
-		return nil, merr
-	}
-
-	tx.UnsafePut(authUsersBucketName, []byte(r.Name), marshaledUser)
+	putUser(tx, newUser)
 
 	plog.Noticef("added a new user: %s", r.Name)
 
@@ -205,9 +255,9 @@ func (as *authStore) UserDelete(r *pb.AuthUserDeleteRequest) (*pb.AuthUserDelete
 	tx.Lock()
 	defer tx.Unlock()
 
-	_, vs := tx.UnsafeRange(authUsersBucketName, []byte(r.Name), nil, 0)
-	if len(vs) != 1 {
-		return &pb.AuthUserDeleteResponse{}, ErrUserNotFound
+	user := getUser(tx, r.Name)
+	if user == nil {
+		return nil, ErrUserNotFound
 	}
 
 	tx.UnsafeDelete(authUsersBucketName, []byte(r.Name))
@@ -230,68 +280,196 @@ func (as *authStore) UserChangePassword(r *pb.AuthUserChangePasswordRequest) (*p
 	tx.Lock()
 	defer tx.Unlock()
 
-	_, vs := tx.UnsafeRange(authUsersBucketName, []byte(r.Name), nil, 0)
-	if len(vs) != 1 {
-		return &pb.AuthUserChangePasswordResponse{}, ErrUserNotFound
+	user := getUser(tx, r.Name)
+	if user == nil {
+		return nil, ErrUserNotFound
 	}
 
-	updatedUser := authpb.User{
+	updatedUser := &authpb.User{
 		Name:     []byte(r.Name),
+		Roles:    user.Roles,
 		Password: hashed,
 	}
 
-	marshaledUser, merr := updatedUser.Marshal()
-	if merr != nil {
-		plog.Errorf("failed to marshal a new user data: %s", merr)
-		return nil, merr
-	}
-
-	tx.UnsafePut(authUsersBucketName, []byte(r.Name), marshaledUser)
+	putUser(tx, updatedUser)
 
 	plog.Noticef("changed a password of a user: %s", r.Name)
 
 	return &pb.AuthUserChangePasswordResponse{}, nil
 }
 
-func (as *authStore) UserGrant(r *pb.AuthUserGrantRequest) (*pb.AuthUserGrantResponse, error) {
+func (as *authStore) UserGrantRole(r *pb.AuthUserGrantRoleRequest) (*pb.AuthUserGrantRoleResponse, error) {
 	tx := as.be.BatchTx()
 	tx.Lock()
 	defer tx.Unlock()
 
-	_, vs := tx.UnsafeRange(authUsersBucketName, []byte(r.User), nil, 0)
-	if len(vs) != 1 {
+	user := getUser(tx, r.User)
+	if user == nil {
 		return nil, ErrUserNotFound
 	}
 
-	user := &authpb.User{}
-	err := user.Unmarshal(vs[0])
-	if err != nil {
-		return nil, err
-	}
-
-	_, vs = tx.UnsafeRange(authRolesBucketName, []byte(r.Role), nil, 0)
-	if len(vs) != 1 {
-		return nil, ErrRoleNotFound
+	if r.Role != rootRole {
+		_, vs := tx.UnsafeRange(authRolesBucketName, []byte(r.Role), nil, 0)
+		if len(vs) != 1 {
+			return nil, ErrRoleNotFound
+		}
 	}
 
 	idx := sort.SearchStrings(user.Roles, r.Role)
 	if idx < len(user.Roles) && strings.Compare(user.Roles[idx], r.Role) == 0 {
 		plog.Warningf("user %s is already granted role %s", r.User, r.Role)
-		return &pb.AuthUserGrantResponse{}, nil
+		return &pb.AuthUserGrantRoleResponse{}, nil
 	}
 
 	user.Roles = append(user.Roles, r.Role)
 	sort.Sort(sort.StringSlice(user.Roles))
 
-	marshaledUser, merr := user.Marshal()
+	putUser(tx, user)
+
+	as.invalidateCachedPerm(r.User)
+
+	plog.Noticef("granted role %s to user %s", r.Role, r.User)
+	return &pb.AuthUserGrantRoleResponse{}, nil
+}
+
+func (as *authStore) UserGet(r *pb.AuthUserGetRequest) (*pb.AuthUserGetResponse, error) {
+	tx := as.be.BatchTx()
+	tx.Lock()
+	defer tx.Unlock()
+
+	user := getUser(tx, r.Name)
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	var resp pb.AuthUserGetResponse
+	for _, role := range user.Roles {
+		resp.Roles = append(resp.Roles, role)
+	}
+
+	return &resp, nil
+}
+
+func (as *authStore) UserRevokeRole(r *pb.AuthUserRevokeRoleRequest) (*pb.AuthUserRevokeRoleResponse, error) {
+	tx := as.be.BatchTx()
+	tx.Lock()
+	defer tx.Unlock()
+
+	user := getUser(tx, r.Name)
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	updatedUser := &authpb.User{}
+	updatedUser.Name = user.Name
+	updatedUser.Password = user.Password
+
+	revoked := false
+	for _, role := range user.Roles {
+		if strings.Compare(role, r.Role) != 0 {
+			updatedUser.Roles = append(updatedUser.Roles, role)
+		} else {
+			revoked = true
+		}
+	}
+
+	if !revoked {
+		return nil, ErrRoleNotGranted
+	}
+
+	putUser(tx, updatedUser)
+
+	as.invalidateCachedPerm(r.Name)
+
+	plog.Noticef("revoked role %s from user %s", r.Role, r.Name)
+	return &pb.AuthUserRevokeRoleResponse{}, nil
+}
+
+func (as *authStore) RoleGet(r *pb.AuthRoleGetRequest) (*pb.AuthRoleGetResponse, error) {
+	tx := as.be.BatchTx()
+	tx.Lock()
+	defer tx.Unlock()
+
+	role := getRole(tx, r.Role)
+	if role == nil {
+		return nil, ErrRoleNotFound
+	}
+
+	var resp pb.AuthRoleGetResponse
+	for _, perm := range role.KeyPermission {
+		resp.Perm = append(resp.Perm, perm)
+	}
+
+	return &resp, nil
+}
+
+func (as *authStore) RoleRevokePermission(r *pb.AuthRoleRevokePermissionRequest) (*pb.AuthRoleRevokePermissionResponse, error) {
+	tx := as.be.BatchTx()
+	tx.Lock()
+	defer tx.Unlock()
+
+	role := getRole(tx, r.Role)
+	if role == nil {
+		return nil, ErrRoleNotFound
+	}
+
+	updatedRole := &authpb.Role{}
+	updatedRole.Name = role.Name
+
+	revoked := false
+	for _, perm := range role.KeyPermission {
+		if !bytes.Equal(perm.Key, []byte(r.Key)) || !bytes.Equal(perm.RangeEnd, []byte(r.RangeEnd)) {
+			updatedRole.KeyPermission = append(updatedRole.KeyPermission, perm)
+		} else {
+			revoked = true
+		}
+	}
+
+	if !revoked {
+		return nil, ErrPermissionNotGranted
+	}
+
+	marshaledRole, merr := updatedRole.Marshal()
 	if merr != nil {
 		return nil, merr
 	}
 
-	tx.UnsafePut(authUsersBucketName, user.Name, marshaledUser)
+	tx.UnsafePut(authRolesBucketName, updatedRole.Name, marshaledRole)
 
-	plog.Noticef("granted role %s to user %s", r.Role, r.User)
-	return &pb.AuthUserGrantResponse{}, nil
+	// TODO(mitake): currently single role update invalidates every cache
+	// It should be optimized.
+	as.clearCachedPerm()
+
+	plog.Noticef("revoked key %s from role %s", r.Key, r.Role)
+	return &pb.AuthRoleRevokePermissionResponse{}, nil
+}
+
+func (as *authStore) RoleDelete(r *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDeleteResponse, error) {
+	// TODO(mitake): current scheme of role deletion allows existing users to have the deleted roles
+	//
+	// Assume a case like below:
+	// create a role r1
+	// create a user u1 and grant r1 to u1
+	// delete r1
+	//
+	// After this sequence, u1 is still granted the role r1. So if admin create a new role with the name r1,
+	// the new r1 is automatically granted u1.
+	// In some cases, it would be confusing. So we need to provide an option for deleting the grant relation
+	// from all users.
+
+	tx := as.be.BatchTx()
+	tx.Lock()
+	defer tx.Unlock()
+
+	role := getRole(tx, r.Role)
+	if role == nil {
+		return nil, ErrRoleNotFound
+	}
+
+	tx.UnsafeDelete(authRolesBucketName, []byte(r.Role))
+
+	plog.Noticef("deleted role %s", r.Role)
+	return &pb.AuthRoleDeleteResponse{}, nil
 }
 
 func (as *authStore) RoleAdd(r *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse, error) {
@@ -299,8 +477,8 @@ func (as *authStore) RoleAdd(r *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse,
 	tx.Lock()
 	defer tx.Unlock()
 
-	_, vs := tx.UnsafeRange(authRolesBucketName, []byte(r.Name), nil, 0)
-	if len(vs) != 0 {
+	role := getRole(tx, r.Name)
+	if role != nil {
 		return nil, ErrRoleAlreadyExist
 	}
 
@@ -341,34 +519,28 @@ func (perms permSlice) Swap(i, j int) {
 	perms[i], perms[j] = perms[j], perms[i]
 }
 
-func (as *authStore) RoleGrant(r *pb.AuthRoleGrantRequest) (*pb.AuthRoleGrantResponse, error) {
+func (as *authStore) RoleGrantPermission(r *pb.AuthRoleGrantPermissionRequest) (*pb.AuthRoleGrantPermissionResponse, error) {
 	tx := as.be.BatchTx()
 	tx.Lock()
 	defer tx.Unlock()
 
-	_, vs := tx.UnsafeRange(authRolesBucketName, []byte(r.Name), nil, 0)
-	if len(vs) != 1 {
+	role := getRole(tx, r.Name)
+	if role == nil {
 		return nil, ErrRoleNotFound
-	}
-
-	role := &authpb.Role{}
-	err := role.Unmarshal(vs[0])
-	if err != nil {
-		plog.Errorf("failed to unmarshal a role %s: %s", r.Name, err)
-		return nil, err
 	}
 
 	idx := sort.Search(len(role.KeyPermission), func(i int) bool {
 		return bytes.Compare(role.KeyPermission[i].Key, []byte(r.Perm.Key)) >= 0
 	})
 
-	if idx < len(role.KeyPermission) && bytes.Equal(role.KeyPermission[idx].Key, r.Perm.Key) {
+	if idx < len(role.KeyPermission) && bytes.Equal(role.KeyPermission[idx].Key, r.Perm.Key) && bytes.Equal(role.KeyPermission[idx].RangeEnd, r.Perm.RangeEnd) {
 		// update existing permission
 		role.KeyPermission[idx].PermType = r.Perm.PermType
 	} else {
 		// append new permission to the role
 		newPerm := &authpb.Permission{
 			Key:      []byte(r.Perm.Key),
+			RangeEnd: []byte(r.Perm.RangeEnd),
 			PermType: r.Perm.PermType,
 		}
 
@@ -384,12 +556,16 @@ func (as *authStore) RoleGrant(r *pb.AuthRoleGrantRequest) (*pb.AuthRoleGrantRes
 
 	tx.UnsafePut(authRolesBucketName, []byte(r.Name), marshaledRole)
 
+	// TODO(mitake): currently single role update invalidates every cache
+	// It should be optimized.
+	as.clearCachedPerm()
+
 	plog.Noticef("role %s's permission of key %s is updated as %s", r.Name, r.Perm.Key, authpb.Permission_Type_name[int32(r.Perm.PermType)])
 
-	return &pb.AuthRoleGrantResponse{}, nil
+	return &pb.AuthRoleGrantPermissionResponse{}, nil
 }
 
-func (as *authStore) isOpPermitted(userName string, key string, write bool, read bool) bool {
+func (as *authStore) isOpPermitted(userName string, key, rangeEnd string, write bool, read bool) bool {
 	// TODO(mitake): this function would be costly so we need a caching mechanism
 	if !as.isAuthEnabled() {
 		return true
@@ -399,35 +575,24 @@ func (as *authStore) isOpPermitted(userName string, key string, write bool, read
 	tx.Lock()
 	defer tx.Unlock()
 
-	_, vs := tx.UnsafeRange(authUsersBucketName, []byte(userName), nil, 0)
-	if len(vs) != 1 {
+	user := getUser(tx, userName)
+	if user == nil {
 		plog.Errorf("invalid user name %s for permission checking", userName)
 		return false
 	}
 
-	user := &authpb.User{}
-	err := user.Unmarshal(vs[0])
-	if err != nil {
-		plog.Errorf("failed to unmarshal user struct (name: %s): %s", userName, err)
-		return false
-	}
+	if strings.Compare(rangeEnd, "") == 0 {
+		for _, roleName := range user.Roles {
+			role := getRole(tx, roleName)
+			if role == nil {
+				continue
+			}
 
-	for _, roleName := range user.Roles {
-		_, vs := tx.UnsafeRange(authRolesBucketName, []byte(roleName), nil, 0)
-		if len(vs) != 1 {
-			plog.Errorf("invalid role name %s for permission checking", roleName)
-			return false
-		}
+			for _, perm := range role.KeyPermission {
+				if !bytes.Equal(perm.Key, []byte(key)) {
+					continue
+				}
 
-		role := &authpb.Role{}
-		err := role.Unmarshal(vs[0])
-		if err != nil {
-			plog.Errorf("failed to unmarshal a role %s: %s", roleName, err)
-			return false
-		}
-
-		for _, perm := range role.KeyPermission {
-			if bytes.Equal(perm.Key, []byte(key)) {
 				if perm.PermType == authpb.READWRITE {
 					return true
 				}
@@ -443,15 +608,72 @@ func (as *authStore) isOpPermitted(userName string, key string, write bool, read
 		}
 	}
 
+	if as.isRangeOpPermitted(tx, userName, key, rangeEnd, write, read) {
+		return true
+	}
+
 	return false
 }
 
 func (as *authStore) IsPutPermitted(header *pb.RequestHeader, key string) bool {
-	return as.isOpPermitted(header.Username, key, true, false)
+	return as.isOpPermitted(header.Username, key, "", true, false)
 }
 
-func (as *authStore) IsRangePermitted(header *pb.RequestHeader, key string) bool {
-	return as.isOpPermitted(header.Username, key, false, true)
+func (as *authStore) IsRangePermitted(header *pb.RequestHeader, key, rangeEnd string) bool {
+	return as.isOpPermitted(header.Username, key, rangeEnd, false, true)
+}
+
+func (as *authStore) IsAdminPermitted(username string) bool {
+	if !as.isAuthEnabled() {
+		return true
+	}
+
+	tx := as.be.BatchTx()
+	tx.Lock()
+	defer tx.Unlock()
+
+	u := getUser(tx, username)
+	if u == nil {
+		return false
+	}
+
+	return hasRootRole(u)
+}
+
+func getUser(tx backend.BatchTx, username string) *authpb.User {
+	_, vs := tx.UnsafeRange(authUsersBucketName, []byte(username), nil, 0)
+	if len(vs) == 0 {
+		return nil
+	}
+
+	user := &authpb.User{}
+	err := user.Unmarshal(vs[0])
+	if err != nil {
+		plog.Panicf("failed to unmarshal user struct (name: %s): %s", username, err)
+	}
+	return user
+}
+
+func putUser(tx backend.BatchTx, user *authpb.User) {
+	b, err := user.Marshal()
+	if err != nil {
+		plog.Panicf("failed to marshal user struct (name: %s): %s", user.Name, err)
+	}
+	tx.UnsafePut(authUsersBucketName, user.Name, b)
+}
+
+func getRole(tx backend.BatchTx, rolename string) *authpb.Role {
+	_, vs := tx.UnsafeRange(authRolesBucketName, []byte(rolename), nil, 0)
+	if len(vs) == 0 {
+		return nil
+	}
+
+	role := &authpb.Role{}
+	err := role.Unmarshal(vs[0])
+	if err != nil {
+		plog.Panicf("failed to unmarshal role struct (name: %s): %s", rolename, err)
+	}
+	return role
 }
 
 func (as *authStore) isAuthEnabled() bool {
@@ -474,4 +696,13 @@ func NewAuthStore(be backend.Backend) *authStore {
 	return &authStore{
 		be: be,
 	}
+}
+
+func hasRootRole(u *authpb.User) bool {
+	for _, r := range u.Roles {
+		if r == rootRole {
+			return true
+		}
+	}
+	return false
 }

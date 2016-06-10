@@ -22,15 +22,16 @@ import (
 
 	"github.com/vishvananda/netlink"
 
+	"flag"
+	"net"
+
 	"github.com/containernetworking/cni/pkg/ip"
 	"github.com/containernetworking/cni/pkg/ipam"
 	"github.com/containernetworking/cni/pkg/ns"
 	"github.com/containernetworking/cni/pkg/skel"
 	"github.com/containernetworking/cni/pkg/types"
-	"github.com/projectcalico/libcalico/lib"
 	. "github.com/projectcalico/calico-cni/utils"
-	"flag"
-	"net"
+	"github.com/projectcalico/libcalico/lib"
 )
 
 var hostname string
@@ -110,8 +111,9 @@ func cmdAddNonK8s(args *skel.CmdArgs, conf NetConf, theEndpoint *libcalico.Endpo
 	profileID := conf.Name
 
 	if theEndpoint != nil {
-		// Don't create the veth or do any networking. Just update the profile on the endpoint
-		// (TODO - creating the profile if required)
+		// Don't create the veth or do any networking. Just update the profile on the endpoint. The profile will
+		// be created if needed during the profile processing step below.
+
 		// There's an existing endpoint - no need to create another. Find the IP address from the endpoint
 		// and use that in the response.
 		theEndpoint.ProfileID = append(theEndpoint.ProfileID, profileID)
@@ -201,9 +203,9 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// Get an existing workload/endpoint (if one exists).
 	theEndpoint, err := libcalico.GetEndpoint(
 		etcd, libcalico.Workload{
-			Hostname: hostname,
+			Hostname:       hostname,
 			OrchestratorID: orchestratorID,
-			WorkloadID: workloadID})
+			WorkloadID:     workloadID})
 
 	fmt.Fprintf(os.Stderr, "Calico CNI checking for existing endpoint. endpoint=%v\n", theEndpoint)
 
@@ -219,7 +221,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 		}
 	} else {
 		result, theEndpoint, err = cmdAddNonK8s(args, conf, theEndpoint)
-				if err != nil {
+		if err != nil {
 			return err
 		}
 	}
@@ -242,7 +244,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	// If Kubernetes is being used then profiles only need to be created if there is no policy block in the network
 	// config. If there is a policy block then "proper" policy is being used and the policy controller handles
 	// profile creation.
-	if ! RunningUnderK8s || conf.Policy == nil {
+	if !RunningUnderK8s || conf.Policy == nil {
 		//TODO - this is the wrong test. It should be on the policy type
 		// Start by checking if the profile already exists. If it already exists then there is no work to do (the CNI plugin never updates a profile).
 		exists, err := libcalico.ProfileExists(conf.Name, etcd)
@@ -250,12 +252,12 @@ func cmdAdd(args *skel.CmdArgs) error {
 			return err
 		}
 
-		if ! exists {
+		if !exists {
 			// The profile doesn't exist so needs to be created. The rules vary depending on whether k8s is being used.
 			// Under k8s (without full policy support) the rule is permissive and allows all traffic.
 			// Otherwise, incoming traffic is only allowed from profiles with the same tag.
-			k8sInboundRule := []libcalico.Rule{libcalico.Rule{Action:"allow"}}
-			tagInboundRule := []libcalico.Rule{libcalico.Rule{Action:"allow", SrcTag:conf.Name}}
+			k8sInboundRule := []libcalico.Rule{libcalico.Rule{Action: "allow"}}
+			tagInboundRule := []libcalico.Rule{libcalico.Rule{Action: "allow", SrcTag: conf.Name}}
 			fmt.Fprintf(os.Stderr, "Calico CNI creating profile. profile=%s\n", conf.Name)
 
 			var inboundRule []libcalico.Rule
@@ -266,11 +268,11 @@ func cmdAdd(args *skel.CmdArgs) error {
 			}
 
 			profile := libcalico.Profile{
-				ID:conf.Name,
-				Rules:libcalico.Rules{
-					Inbound: inboundRule,
-					Outbound:[]libcalico.Rule{libcalico.Rule{Action:"allow"}}},
-				Tags:[]string{conf.Name}}
+				ID: conf.Name,
+				Rules: libcalico.Rules{
+					Inbound:  inboundRule,
+					Outbound: []libcalico.Rule{libcalico.Rule{Action: "allow"}}},
+				Tags: []string{conf.Name}}
 			if err := profile.Write(etcd); err != nil {
 				return err
 			}
@@ -318,9 +320,9 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 	workload := libcalico.Workload{
-		Hostname:hostname,
-		OrchestratorID:orchestratorId,
-		WorkloadID:workloadID}
+		Hostname:       hostname,
+		OrchestratorID: orchestratorId,
+		WorkloadID:     workloadID}
 	if err := workload.Delete(etcd); err != nil {
 		return err
 	}
@@ -355,4 +357,3 @@ func main() {
 	}
 	skel.PluginMain(cmdAdd, cmdDel)
 }
-

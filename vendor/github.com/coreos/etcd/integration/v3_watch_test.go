@@ -676,8 +676,8 @@ func testV3WatchMultipleEventsTxn(t *testing.T, startRev int64) {
 	kvc := toGRPC(clus.RandClient()).KV
 	txn := pb.TxnRequest{}
 	for i := 0; i < 3; i++ {
-		ru := &pb.RequestUnion{}
-		ru.Request = &pb.RequestUnion_RequestPut{
+		ru := &pb.RequestOp{}
+		ru.Request = &pb.RequestOp_RequestPut{
 			RequestPut: &pb.PutRequest{
 				Key: []byte(fmt.Sprintf("foo%d", i)), Value: []byte("bar")}}
 		txn.Success = append(txn.Success, ru)
@@ -983,7 +983,7 @@ func TestV3WatchClose(t *testing.T) {
 	clus := NewClusterV3(t, &ClusterConfig{Size: 1})
 	defer clus.Terminate(t)
 
-	c := clus.RandClient()
+	c := clus.Client(0)
 	wapi := toGRPC(c).Watch
 
 	var wg sync.WaitGroup
@@ -1007,6 +1007,7 @@ func TestV3WatchClose(t *testing.T) {
 			ws.Recv()
 		}()
 	}
-	c.ActiveConnection().Close()
+
+	clus.Members[0].DropConnections()
 	wg.Wait()
 }

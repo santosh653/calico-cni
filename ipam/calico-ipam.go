@@ -1,11 +1,12 @@
 package main
 
 import (
-	"github.com/containernetworking/cni/pkg/skel"
-	"github.com/containernetworking/cni/pkg/types"
-	"net"
 	"encoding/json"
 	"fmt"
+	"net"
+
+	"github.com/containernetworking/cni/pkg/skel"
+	"github.com/containernetworking/cni/pkg/types"
 	"github.com/projectcalico/libcalico/lib/ipam"
 )
 
@@ -16,8 +17,8 @@ func main() {
 // IPAMConfig represents the IP related network configuration.
 type IPAMConfig struct {
 	Name string
-	Type string        `json:"type"`
-	Args *IPAMArgs     `json:"-"`
+	Type string    `json:"type"`
+	Args *IPAMArgs `json:"-"`
 }
 
 type IPAMArgs struct {
@@ -65,15 +66,15 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	//TODO ...
+	//TODO - does this code need to fetch the pools or should ipamClient do it automatically.
 	_, pool, _ := net.ParseCIDR("192.168.0.0/16")
 
 	addresses, _, _ := ipamClient.AutoAssign(1, 0, "", map[string]string{}, nil, pool, nil)
 
-	ipNetwork := net.IPNet{IP: addresses[0], Mask:net.CIDRMask(32, 32)}
+	ipNetwork := net.IPNet{IP: addresses[0], Mask: net.CIDRMask(32, 32)}
 
 	r := &types.Result{
-		IP4: &types.IPConfig{IP:ipNetwork},
+		IP4: &types.IPConfig{IP: ipNetwork},
 	}
 	return r.Print()
 }
@@ -84,8 +85,7 @@ func cmdDel(args *skel.CmdArgs) error {
 		return err
 	}
 
-	//TODO  - need to release the address
-
+	//TODO  - need to release the address - but don't have an API yet
 
 	return nil
 }

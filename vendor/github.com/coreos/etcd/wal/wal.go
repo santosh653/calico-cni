@@ -47,6 +47,10 @@ const (
 	// the expected size of each wal segment file.
 	// the actual size might be bigger than it.
 	segmentSizeBytes = 64 * 1000 * 1000 // 64MB
+
+	// warnSyncDuration is the amount of time allotted to an fsync before
+	// logging a warning
+	warnSyncDuration = time.Second
 )
 
 var (
@@ -207,15 +211,8 @@ func openAtIndex(dirpath string, snap walpb.Snapshot, write bool) (*WAL, error) 
 		// write reuses the file descriptors from read; don't close so
 		// WAL can append without dropping the file lock
 		w.readClose = nil
-
 		if _, _, err := parseWalName(path.Base(w.tail().Name())); err != nil {
 			closer()
-			return nil, err
-		}
-		// don't resize file for preallocation in case tail is corrupted
-		if err := fileutil.Preallocate(w.tail().File, segmentSizeBytes, false); err != nil {
-			closer()
-			plog.Errorf("failed to allocate space when creating new wal file (%v)", err)
 			return nil, err
 		}
 		w.fp = newFilePipeline(w.dir, segmentSizeBytes)
@@ -400,7 +397,13 @@ func (w *WAL) sync() error {
 	}
 	start := time.Now()
 	err := fileutil.Fdatasync(w.tail().File)
-	syncDurations.Observe(time.Since(start).Seconds())
+
+	duration := time.Since(start)
+	if duration > warnSyncDuration {
+		plog.Warningf("sync duration of %v, expected less than %v", duration, warnSyncDuration)
+	}
+	syncDurations.Observe(duration.Seconds())
+
 	return err
 }
 

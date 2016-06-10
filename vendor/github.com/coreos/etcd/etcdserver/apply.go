@@ -51,18 +51,26 @@ type applierV3 interface {
 	DeleteRange(txnID int64, dr *pb.DeleteRangeRequest) (*pb.DeleteRangeResponse, error)
 	Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error)
 	Compaction(compaction *pb.CompactionRequest) (*pb.CompactionResponse, <-chan struct{}, error)
+
 	LeaseGrant(lc *pb.LeaseGrantRequest) (*pb.LeaseGrantResponse, error)
 	LeaseRevoke(lc *pb.LeaseRevokeRequest) (*pb.LeaseRevokeResponse, error)
+
 	Alarm(*pb.AlarmRequest) (*pb.AlarmResponse, error)
+
 	AuthEnable() (*pb.AuthEnableResponse, error)
 	AuthDisable() (*pb.AuthDisableResponse, error)
 	Authenticate(r *pb.AuthenticateRequest) (*pb.AuthenticateResponse, error)
 	UserAdd(ua *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse, error)
 	UserDelete(ua *pb.AuthUserDeleteRequest) (*pb.AuthUserDeleteResponse, error)
 	UserChangePassword(ua *pb.AuthUserChangePasswordRequest) (*pb.AuthUserChangePasswordResponse, error)
-	UserGrant(ua *pb.AuthUserGrantRequest) (*pb.AuthUserGrantResponse, error)
+	UserGrantRole(ua *pb.AuthUserGrantRoleRequest) (*pb.AuthUserGrantRoleResponse, error)
+	UserGet(ua *pb.AuthUserGetRequest) (*pb.AuthUserGetResponse, error)
+	UserRevokeRole(ua *pb.AuthUserRevokeRoleRequest) (*pb.AuthUserRevokeRoleResponse, error)
 	RoleAdd(ua *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse, error)
-	RoleGrant(ua *pb.AuthRoleGrantRequest) (*pb.AuthRoleGrantResponse, error)
+	RoleGrantPermission(ua *pb.AuthRoleGrantPermissionRequest) (*pb.AuthRoleGrantPermissionResponse, error)
+	RoleGet(ua *pb.AuthRoleGetRequest) (*pb.AuthRoleGetResponse, error)
+	RoleRevokePermission(ua *pb.AuthRoleRevokePermissionRequest) (*pb.AuthRoleRevokePermissionResponse, error)
+	RoleDelete(ua *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDeleteResponse, error)
 }
 
 type applierV3backend struct {
@@ -71,9 +79,16 @@ type applierV3backend struct {
 
 func (s *EtcdServer) applyV3Request(r *pb.InternalRaftRequest) *applyResult {
 	ar := &applyResult{}
+	username := r.Header.Username
+
+	if needAdminPermission(r) && !s.AuthStore().IsAdminPermitted(username) {
+		ar.err = auth.ErrPermissionDenied
+		return ar
+	}
+
 	switch {
 	case r.Range != nil:
-		if s.AuthStore().IsRangePermitted(r.Header, string(r.Range.Key)) {
+		if s.AuthStore().IsRangePermitted(r.Header, string(r.Range.Key), string(r.Range.RangeEnd)) {
 			ar.resp, ar.err = s.applyV3.Range(noTxn, r.Range)
 		} else {
 			ar.err = auth.ErrPermissionDenied
@@ -96,6 +111,7 @@ func (s *EtcdServer) applyV3Request(r *pb.InternalRaftRequest) *applyResult {
 		ar.resp, ar.err = s.applyV3.LeaseRevoke(r.LeaseRevoke)
 	case r.Alarm != nil:
 		ar.resp, ar.err = s.applyV3.Alarm(r.Alarm)
+
 	case r.AuthEnable != nil:
 		ar.resp, ar.err = s.applyV3.AuthEnable()
 	case r.AuthDisable != nil:
@@ -108,12 +124,22 @@ func (s *EtcdServer) applyV3Request(r *pb.InternalRaftRequest) *applyResult {
 		ar.resp, ar.err = s.applyV3.UserDelete(r.AuthUserDelete)
 	case r.AuthUserChangePassword != nil:
 		ar.resp, ar.err = s.applyV3.UserChangePassword(r.AuthUserChangePassword)
-	case r.AuthUserGrant != nil:
-		ar.resp, ar.err = s.applyV3.UserGrant(r.AuthUserGrant)
+	case r.AuthUserGrantRole != nil:
+		ar.resp, ar.err = s.applyV3.UserGrantRole(r.AuthUserGrantRole)
+	case r.AuthUserGet != nil:
+		ar.resp, ar.err = s.applyV3.UserGet(r.AuthUserGet)
+	case r.AuthUserRevokeRole != nil:
+		ar.resp, ar.err = s.applyV3.UserRevokeRole(r.AuthUserRevokeRole)
 	case r.AuthRoleAdd != nil:
 		ar.resp, ar.err = s.applyV3.RoleAdd(r.AuthRoleAdd)
-	case r.AuthRoleGrant != nil:
-		ar.resp, ar.err = s.applyV3.RoleGrant(r.AuthRoleGrant)
+	case r.AuthRoleGrantPermission != nil:
+		ar.resp, ar.err = s.applyV3.RoleGrantPermission(r.AuthRoleGrantPermission)
+	case r.AuthRoleGet != nil:
+		ar.resp, ar.err = s.applyV3.RoleGet(r.AuthRoleGet)
+	case r.AuthRoleRevokePermission != nil:
+		ar.resp, ar.err = s.applyV3.RoleRevokePermission(r.AuthRoleRevokePermission)
+	case r.AuthRoleDelete != nil:
+		ar.resp, ar.err = s.applyV3.RoleDelete(r.AuthRoleDelete)
 	default:
 		panic("not implemented")
 	}
@@ -251,7 +277,7 @@ func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 		}
 	}
 
-	var reqs []*pb.RequestUnion
+	var reqs []*pb.RequestOp
 	if ok {
 		reqs = rt.Success
 	} else {
@@ -277,7 +303,7 @@ func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 		}
 	}()
 
-	resps := make([]*pb.ResponseUnion, len(reqs))
+	resps := make([]*pb.ResponseOp, len(reqs))
 	changedKV := false
 	for i := range reqs {
 		if reqs[i].GetRequestRange() == nil {
@@ -366,31 +392,31 @@ func (a *applierV3backend) applyCompare(c *pb.Compare) (int64, bool) {
 	return rev, true
 }
 
-func (a *applierV3backend) applyUnion(txnID int64, union *pb.RequestUnion) *pb.ResponseUnion {
+func (a *applierV3backend) applyUnion(txnID int64, union *pb.RequestOp) *pb.ResponseOp {
 	switch tv := union.Request.(type) {
-	case *pb.RequestUnion_RequestRange:
+	case *pb.RequestOp_RequestRange:
 		if tv.RequestRange != nil {
 			resp, err := a.Range(txnID, tv.RequestRange)
 			if err != nil {
 				panic("unexpected error during txn")
 			}
-			return &pb.ResponseUnion{Response: &pb.ResponseUnion_ResponseRange{ResponseRange: resp}}
+			return &pb.ResponseOp{Response: &pb.ResponseOp_ResponseRange{ResponseRange: resp}}
 		}
-	case *pb.RequestUnion_RequestPut:
+	case *pb.RequestOp_RequestPut:
 		if tv.RequestPut != nil {
 			resp, err := a.Put(txnID, tv.RequestPut)
 			if err != nil {
 				panic("unexpected error during txn")
 			}
-			return &pb.ResponseUnion{Response: &pb.ResponseUnion_ResponsePut{ResponsePut: resp}}
+			return &pb.ResponseOp{Response: &pb.ResponseOp_ResponsePut{ResponsePut: resp}}
 		}
-	case *pb.RequestUnion_RequestDeleteRange:
+	case *pb.RequestOp_RequestDeleteRange:
 		if tv.RequestDeleteRange != nil {
 			resp, err := a.DeleteRange(txnID, tv.RequestDeleteRange)
 			if err != nil {
 				panic("unexpected error during txn")
 			}
-			return &pb.ResponseUnion{Response: &pb.ResponseUnion_ResponseDeleteRange{ResponseDeleteRange: resp}}
+			return &pb.ResponseOp{Response: &pb.ResponseOp_ResponseDeleteRange{ResponseDeleteRange: resp}}
 		}
 	default:
 		// empty union
@@ -503,7 +529,10 @@ func (a *applierV3Capped) LeaseGrant(lc *pb.LeaseGrantRequest) (*pb.LeaseGrantRe
 }
 
 func (a *applierV3backend) AuthEnable() (*pb.AuthEnableResponse, error) {
-	a.s.AuthStore().AuthEnable()
+	err := a.s.AuthStore().AuthEnable()
+	if err != nil {
+		return nil, err
+	}
 	return &pb.AuthEnableResponse{}, nil
 }
 
@@ -528,16 +557,36 @@ func (a *applierV3backend) UserChangePassword(r *pb.AuthUserChangePasswordReques
 	return a.s.AuthStore().UserChangePassword(r)
 }
 
-func (a *applierV3backend) UserGrant(r *pb.AuthUserGrantRequest) (*pb.AuthUserGrantResponse, error) {
-	return a.s.AuthStore().UserGrant(r)
+func (a *applierV3backend) UserGrantRole(r *pb.AuthUserGrantRoleRequest) (*pb.AuthUserGrantRoleResponse, error) {
+	return a.s.AuthStore().UserGrantRole(r)
+}
+
+func (a *applierV3backend) UserGet(r *pb.AuthUserGetRequest) (*pb.AuthUserGetResponse, error) {
+	return a.s.AuthStore().UserGet(r)
+}
+
+func (a *applierV3backend) UserRevokeRole(r *pb.AuthUserRevokeRoleRequest) (*pb.AuthUserRevokeRoleResponse, error) {
+	return a.s.AuthStore().UserRevokeRole(r)
 }
 
 func (a *applierV3backend) RoleAdd(r *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse, error) {
 	return a.s.AuthStore().RoleAdd(r)
 }
 
-func (a *applierV3backend) RoleGrant(r *pb.AuthRoleGrantRequest) (*pb.AuthRoleGrantResponse, error) {
-	return a.s.AuthStore().RoleGrant(r)
+func (a *applierV3backend) RoleGrantPermission(r *pb.AuthRoleGrantPermissionRequest) (*pb.AuthRoleGrantPermissionResponse, error) {
+	return a.s.AuthStore().RoleGrantPermission(r)
+}
+
+func (a *applierV3backend) RoleGet(r *pb.AuthRoleGetRequest) (*pb.AuthRoleGetResponse, error) {
+	return a.s.AuthStore().RoleGet(r)
+}
+
+func (a *applierV3backend) RoleRevokePermission(r *pb.AuthRoleRevokePermissionRequest) (*pb.AuthRoleRevokePermissionResponse, error) {
+	return a.s.AuthStore().RoleRevokePermission(r)
+}
+
+func (a *applierV3backend) RoleDelete(r *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDeleteResponse, error) {
+	return a.s.AuthStore().RoleDelete(r)
 }
 
 type quotaApplierV3 struct {
@@ -615,9 +664,9 @@ func (s *kvSortByValue) Less(i, j int) bool {
 	return bytes.Compare(s.kvs[i].Value, s.kvs[j].Value) < 0
 }
 
-func (a *applierV3backend) checkRequestLeases(reqs []*pb.RequestUnion) error {
+func (a *applierV3backend) checkRequestLeases(reqs []*pb.RequestOp) error {
 	for _, requ := range reqs {
-		tv, ok := requ.Request.(*pb.RequestUnion_RequestPut)
+		tv, ok := requ.Request.(*pb.RequestOp_RequestPut)
 		if !ok {
 			continue
 		}
@@ -632,9 +681,9 @@ func (a *applierV3backend) checkRequestLeases(reqs []*pb.RequestUnion) error {
 	return nil
 }
 
-func (a *applierV3backend) checkRequestRange(reqs []*pb.RequestUnion) error {
+func (a *applierV3backend) checkRequestRange(reqs []*pb.RequestOp) error {
 	for _, requ := range reqs {
-		tv, ok := requ.Request.(*pb.RequestUnion_RequestRange)
+		tv, ok := requ.Request.(*pb.RequestOp_RequestRange)
 		if !ok {
 			continue
 		}
@@ -668,4 +717,37 @@ func compareInt64(a, b int64) int {
 // sending empty byte strings as nil; >= is encoded in the range end as '\0'.
 func isGteRange(rangeEnd []byte) bool {
 	return len(rangeEnd) == 1 && rangeEnd[0] == 0
+}
+
+func needAdminPermission(r *pb.InternalRaftRequest) bool {
+	switch {
+	case r.AuthEnable != nil:
+		return true
+	case r.AuthDisable != nil:
+		return true
+	case r.AuthUserAdd != nil:
+		return true
+	case r.AuthUserDelete != nil:
+		return true
+	case r.AuthUserChangePassword != nil:
+		return true
+	case r.AuthUserGrantRole != nil:
+		return true
+	case r.AuthUserGet != nil:
+		return true
+	case r.AuthUserRevokeRole != nil:
+		return true
+	case r.AuthRoleAdd != nil:
+		return true
+	case r.AuthRoleGrantPermission != nil:
+		return true
+	case r.AuthRoleGet != nil:
+		return true
+	case r.AuthRoleRevokePermission != nil:
+		return true
+	case r.AuthRoleDelete != nil:
+		return true
+	default:
+		return false
+	}
 }

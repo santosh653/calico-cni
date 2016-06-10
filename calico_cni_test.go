@@ -1,16 +1,17 @@
 package main_test
 
 import (
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"encoding/json"
 	"fmt"
 	"os"
-	"github.com/onsi/gomega/gexec"
 	"os/exec"
-	. "github.com/projectcalico/calico-cni/test_utils"
-	"github.com/onsi/gomega/gbytes"
-	"encoding/json"
+
 	"github.com/containernetworking/cni/pkg/types"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gbytes"
+	"github.com/onsi/gomega/gexec"
+	. "github.com/projectcalico/calico-cni/test_utils"
 )
 
 // Some ideas for more tests
@@ -21,11 +22,9 @@ import (
 // vary the MTU
 // Existing endpoint
 
-
 //var _ = Describe("CalicoCniIpam", func() {
 //	Describe("Run Calico CNI IPAM plugin", func() {
 //})
-
 
 var _ = Describe("CalicoCni", func() {
 	BeforeEach(func() {
@@ -48,7 +47,6 @@ var _ = Describe("CalicoCni", func() {
 			  }
 			}`, os.Getenv("ETCD_IP"))
 
-
 			It("successfully networks the namespace", func() {
 				containerID, session, err := CreateContainer(netconf)
 				Expect(err).ShouldNot(HaveOccurred())
@@ -56,11 +54,11 @@ var _ = Describe("CalicoCni", func() {
 				//fmt.Printf("container_id: %v, result: %s\n", containerID, session.Out.Contents())
 
 				result := types.Result{}
-				    if err := json.Unmarshal(session.Out.Contents(), &result); err != nil {
+				if err := json.Unmarshal(session.Out.Contents(), &result); err != nil {
 					panic(err)
-				    }
+				}
 				ip := result.IP4.IP.IP.String()
-				Expect(result.IP4.IP.Mask.String()).Should(Equal("ff000000")) //TODO Should be all FF
+				Expect(result.IP4.IP.Mask.String()).Should(Equal("ffffffff")) //TODO Should be all FF
 
 				// etcd things:
 				// Profile is created with correct details
@@ -114,7 +112,6 @@ var _ = Describe("CalicoCni", func() {
 			  }
 			}`, os.Getenv("ETCD_IP"))
 
-
 			It("successfully networks the namespace", func() {
 				containerID, session, err := CreateContainer(netconf)
 				Expect(err).ShouldNot(HaveOccurred())
@@ -122,11 +119,11 @@ var _ = Describe("CalicoCni", func() {
 				//fmt.Printf("container_id: %v, result: %s\n", containerID, session.Out.Contents())
 
 				result := types.Result{}
-				    if err := json.Unmarshal(session.Out.Contents(), &result); err != nil {
+				if err := json.Unmarshal(session.Out.Contents(), &result); err != nil {
 					panic(err)
-				    }
+				}
 				ip := result.IP4.IP.IP.String()
-				Expect(result.IP4.IP.Mask.String()).Should(Equal("ffffffff")) //TODO Should be all FF
+				Expect(result.IP4.IP.Mask.String()).Should(Equal("ffffffff"))
 
 				// etcd things:
 				// Profile is created with correct details
@@ -170,4 +167,3 @@ var _ = Describe("CalicoCni", func() {
 		})
 	})
 })
-
