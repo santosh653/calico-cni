@@ -1,5 +1,5 @@
 hash: f154ddee0ea819f492010df967b8a1b3e9ece3d366054851a376c9f1527f34e4
-updated: 2016-06-10T13:13:20.417833051-07:00
+updated: 2016-06-10T14:32:41.403429017-07:00
 imports:
 - name: github.com/containernetworking/cni
   version: c3c08038177dfc3900b11ce54de55648d4b95184
@@ -11,7 +11,7 @@ imports:
   - pkg/types
   - pkg/invoke
 - name: github.com/coreos/etcd
-  version: e854fa1856ff6baec33b0522667fdff4dbc1a328
+  version: bb6102c00ce157b79357de98a585d4607eb32989
   subpackages:
   - client
   - pkg/pathutil

@@ -17,6 +17,7 @@ package auth
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"github.com/coreos/etcd/mvcc/backend"
 	"github.com/coreos/pkg/capnslog"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/net/context"
 )
 
 var (
@@ -63,11 +65,8 @@ type AuthStore interface {
 	// AuthDisable turns off the authentication feature
 	AuthDisable()
 
-	// Authenticate does authentication based on given user name and password,
-	// and returns a token for successful case.
-	// Note that the generated token is valid only for the member the client
-	// connected to within fixed time duration. Reauth is required after the duration.
-	Authenticate(name string, password string) (*pb.AuthenticateResponse, error)
+	// Authenticate does authentication based on given user name and password
+	Authenticate(ctx context.Context, username, password string) (*pb.AuthenticateResponse, error)
 
 	// Recover recovers the state of auth store from the given backend
 	Recover(b backend.Backend)
@@ -116,6 +115,9 @@ type AuthStore interface {
 
 	// IsAdminPermitted checks admin permission of the user
 	IsAdminPermitted(username string) bool
+
+	// GenSimpleToken produces a simple random string
+	GenSimpleToken() (string, error)
 }
 
 type authStore struct {
@@ -124,6 +126,9 @@ type authStore struct {
 	enabledMu sync.RWMutex
 
 	rangePermCache map[string]*unifiedRangePermissions // username -> unifiedRangePermissions
+
+	simpleTokensMu sync.RWMutex
+	simpleTokens   map[string]string // token -> username
 }
 
 func (as *authStore) AuthEnable() error {
@@ -172,35 +177,29 @@ func (as *authStore) AuthDisable() {
 	plog.Noticef("Authentication disabled")
 }
 
-func (as *authStore) Authenticate(name string, password string) (*pb.AuthenticateResponse, error) {
+func (as *authStore) Authenticate(ctx context.Context, username, password string) (*pb.AuthenticateResponse, error) {
+	// TODO(mitake): after adding jwt support, branching based on values of ctx is required
+	index := ctx.Value("index").(uint64)
+	simpleToken := ctx.Value("simpleToken").(string)
+
 	tx := as.be.BatchTx()
 	tx.Lock()
 	defer tx.Unlock()
 
-	_, vs := tx.UnsafeRange(authUsersBucketName, []byte(name), nil, 0)
-	if len(vs) != 1 {
-		plog.Noticef("authentication failed, user %s doesn't exist", name)
-		return &pb.AuthenticateResponse{}, ErrAuthFailed
-	}
-
-	user := &authpb.User{}
-	err := user.Unmarshal(vs[0])
-	if err != nil {
-		return nil, err
+	user := getUser(tx, username)
+	if user == nil {
+		return nil, ErrAuthFailed
 	}
 
 	if bcrypt.CompareHashAndPassword(user.Password, []byte(password)) != nil {
-		plog.Noticef("authentication failed, invalid password for user %s", name)
+		plog.Noticef("authentication failed, invalid password for user %s", username)
 		return &pb.AuthenticateResponse{}, ErrAuthFailed
 	}
 
-	token, err := genSimpleTokenForUser(name)
-	if err != nil {
-		plog.Errorf("failed to generate simple token: %s", err)
-		return nil, err
-	}
+	token := fmt.Sprintf("%s.%d", simpleToken, index)
+	as.assignSimpleTokenToUser(username, token)
 
-	plog.Infof("authorized %s, token is %s", name, token)
+	plog.Infof("authorized %s, token is %s", username, token)
 	return &pb.AuthenticateResponse{Token: token}, nil
 }
 
@@ -260,7 +259,7 @@ func (as *authStore) UserDelete(r *pb.AuthUserDeleteRequest) (*pb.AuthUserDelete
 		return nil, ErrUserNotFound
 	}
 
-	tx.UnsafeDelete(authUsersBucketName, []byte(r.Name))
+	delUser(tx, r.Name)
 
 	plog.Noticef("deleted a user: %s", r.Name)
 
@@ -309,8 +308,8 @@ func (as *authStore) UserGrantRole(r *pb.AuthUserGrantRoleRequest) (*pb.AuthUser
 	}
 
 	if r.Role != rootRole {
-		_, vs := tx.UnsafeRange(authRolesBucketName, []byte(r.Role), nil, 0)
-		if len(vs) != 1 {
+		role := getRole(tx, r.Role)
+		if role == nil {
 			return nil, ErrRoleNotFound
 		}
 	}
@@ -429,12 +428,7 @@ func (as *authStore) RoleRevokePermission(r *pb.AuthRoleRevokePermissionRequest)
 		return nil, ErrPermissionNotGranted
 	}
 
-	marshaledRole, merr := updatedRole.Marshal()
-	if merr != nil {
-		return nil, merr
-	}
-
-	tx.UnsafePut(authRolesBucketName, updatedRole.Name, marshaledRole)
+	putRole(tx, updatedRole)
 
 	// TODO(mitake): currently single role update invalidates every cache
 	// It should be optimized.
@@ -466,7 +460,7 @@ func (as *authStore) RoleDelete(r *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDelete
 		return nil, ErrRoleNotFound
 	}
 
-	tx.UnsafeDelete(authRolesBucketName, []byte(r.Role))
+	delRole(tx, r.Role)
 
 	plog.Noticef("deleted role %s", r.Role)
 	return &pb.AuthRoleDeleteResponse{}, nil
@@ -486,12 +480,7 @@ func (as *authStore) RoleAdd(r *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse,
 		Name: []byte(r.Name),
 	}
 
-	marshaledRole, err := newRole.Marshal()
-	if err != nil {
-		return nil, err
-	}
-
-	tx.UnsafePut(authRolesBucketName, []byte(r.Name), marshaledRole)
+	putRole(tx, newRole)
 
 	plog.Noticef("Role %s is created", r.Name)
 
@@ -499,9 +488,9 @@ func (as *authStore) RoleAdd(r *pb.AuthRoleAddRequest) (*pb.AuthRoleAddResponse,
 }
 
 func (as *authStore) UsernameFromToken(token string) (string, bool) {
-	simpleTokensMu.RLock()
-	defer simpleTokensMu.RUnlock()
-	t, ok := simpleTokens[token]
+	as.simpleTokensMu.RLock()
+	defer as.simpleTokensMu.RUnlock()
+	t, ok := as.simpleTokens[token]
 	return t, ok
 }
 
@@ -548,13 +537,7 @@ func (as *authStore) RoleGrantPermission(r *pb.AuthRoleGrantPermissionRequest) (
 		sort.Sort(permSlice(role.KeyPermission))
 	}
 
-	marshaledRole, merr := role.Marshal()
-	if merr != nil {
-		plog.Errorf("failed to marshal updated role %s: %s", r.Name, merr)
-		return nil, merr
-	}
-
-	tx.UnsafePut(authRolesBucketName, []byte(r.Name), marshaledRole)
+	putRole(tx, role)
 
 	// TODO(mitake): currently single role update invalidates every cache
 	// It should be optimized.
@@ -662,6 +645,10 @@ func putUser(tx backend.BatchTx, user *authpb.User) {
 	tx.UnsafePut(authUsersBucketName, user.Name, b)
 }
 
+func delUser(tx backend.BatchTx, username string) {
+	tx.UnsafeDelete(authUsersBucketName, []byte(username))
+}
+
 func getRole(tx backend.BatchTx, rolename string) *authpb.Role {
 	_, vs := tx.UnsafeRange(authRolesBucketName, []byte(rolename), nil, 0)
 	if len(vs) == 0 {
@@ -674,6 +661,19 @@ func getRole(tx backend.BatchTx, rolename string) *authpb.Role {
 		plog.Panicf("failed to unmarshal role struct (name: %s): %s", rolename, err)
 	}
 	return role
+}
+
+func putRole(tx backend.BatchTx, role *authpb.Role) {
+	b, err := role.Marshal()
+	if err != nil {
+		plog.Panicf("failed to marshal role struct (name: %s): %s", role.Name, err)
+	}
+
+	tx.UnsafePut(authRolesBucketName, []byte(role.Name), b)
+}
+
+func delRole(tx backend.BatchTx, rolename string) {
+	tx.UnsafeDelete(authRolesBucketName, []byte(rolename))
 }
 
 func (as *authStore) isAuthEnabled() bool {
@@ -694,7 +694,8 @@ func NewAuthStore(be backend.Backend) *authStore {
 	be.ForceCommit()
 
 	return &authStore{
-		be: be,
+		be:           be,
+		simpleTokens: make(map[string]string),
 	}
 }
 
