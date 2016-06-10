@@ -17,13 +17,12 @@ BUILD_TAGS?=
 
 default: all
 all: binary test
-binary: update-version dist/calico dist/calico-ipam
-test: ut
+binary:  dist/calico dist/calico-ipam
 plugin: dist/calico
 ipam: dist/calico-ipam
 
 # Run the unit tests.
-ut: dist/calico dist/calico-ipam
+test: dist/calico dist/calico-ipam run-etcd
 	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=/home/tom/go /home/tom/go/bin/ginkgo
 
 

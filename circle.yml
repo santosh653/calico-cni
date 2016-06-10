@@ -6,4 +6,4 @@ machine:
     - docker
 test:
   override:
-    - make test-circle
+    - make

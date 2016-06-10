@@ -58,7 +58,7 @@ var _ = Describe("CalicoCni", func() {
 					panic(err)
 				}
 				ip := result.IP4.IP.IP.String()
-				Expect(result.IP4.IP.Mask.String()).Should(Equal("ffffffff")) //TODO Should be all FF
+				Expect(result.IP4.IP.Mask.String()).Should(Equal("ff000000")) //TODO Should be all FF
 
 				// etcd things:
 				// Profile is created with correct details
