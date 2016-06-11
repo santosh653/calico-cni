@@ -26,17 +26,26 @@ test: dist/calico dist/calico-ipam run-etcd
 	go get github.com/onsi/ginkgo/ginkgo
 	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=$(GOPATH) $(shell which ginkgo)
 
-test_container.created: Dockerfile
-	docker build -t test_container .
-	touch test_container.created
+cni_container.created: Dockerfile
+	docker build -t cni_container .
+	touch cni_container.created
 
-test-containerized: dist/calico dist/host-local run-etcd test_container.created
+test-containerized: run-etcd cni_container.created build-containerized
 	docker run -ti --rm --privileged --net=host \
 	--hostname cnitests \
 	-e ETCD_IP=$(LOCAL_IP_ENV) \
 	-e PLUGIN=calico \
 	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
-	test_container bash -c 'ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico ginkgo'
+	cni_container bash -c 'ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico ginkgo'
+
+build-containerized: cni_container.created
+	mkdir -p dist
+	docker run --rm \
+	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
+	-v ${PWD}/dist:/go/src/github.com/projectcalico/calico-cni/dist \
+	cni_container bash -c '\
+		make binary; \
+		chown -R $(shell id -u):$(shell id -u) dist'
 
 # Run the unit tests, watching for changes.
 ut-watch: dist/calico dist/calico-ipam
