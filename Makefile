@@ -32,11 +32,10 @@ cni_container.created: Dockerfile
 
 test-containerized: run-etcd cni_container.created build-containerized
 	docker run -ti --rm --privileged --net=host \
-	--hostname cnitests \
 	-e ETCD_IP=$(LOCAL_IP_ENV) \
 	-e PLUGIN=calico \
 	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
-	cni_container bash -c 'ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico ginkgo'
+	cni_container ginkgo
 
 build-containerized: cni_container.created
 	mkdir -p dist
