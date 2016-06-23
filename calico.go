@@ -44,112 +44,6 @@ func init() {
 	hostname, _ = os.Hostname()
 }
 
-func cmdAddK8s(args *skel.CmdArgs, k8sArgs K8sArgs, conf NetConf, theEndpoint *libcalico.Endpoint) (*types.Result, *libcalico.Endpoint, error) {
-	var err error
-	var result *types.Result
-
-	profileID := fmt.Sprintf("k8s_ns.%s", k8sArgs.K8S_POD_NAMESPACE)
-
-	if theEndpoint != nil {
-		// This happens when Docker or the node restarts. K8s calls CNI with the same details as before.
-		// Do the networking but no etcd changes should be required.
-		// There's an existing endpoint - no need to create another. Find the IP address from the endpoint
-		// and use that in the response.
-		result, err = createResultFromIP(theEndpoint.IPv4Nets[0])
-		if err != nil {
-			return nil, nil, err
-		}
-
-		// We're assuming that the endpoint is fine and doesn't need to be changed.
-		// However, the veth does need to be recreated since the namespace has been lost.
-		_, err := DoNetworking(args, conf, result)
-		if err != nil {
-			return nil, nil, err
-		}
-		// TODO - what if labels changed during the restart?
-
-	} else {
-		// There's no existing endpoint, so we need to do the following:
-		// 1) Call the configured IPAM plugin to get IP address(es)
-		// 2) Create the veth, configuring it on both the host and container namespace.
-		// 3) Configure the calico endpoint
-
-		// 1) run the IPAM plugin and make sure there's an IPv4 address
-		result, err = ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
-		if err != nil {
-			return nil, nil, err
-		}
-		if result.IP4 == nil {
-			return nil, nil, errors.New("IPAM plugin returned missing IPv4 config")
-		}
-
-		// 2) Set up the veth
-		hostVethName, err := DoNetworking(args, conf, result)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		// 3) Update the endpoint
-		labels, err := GetK8sLabels(conf, k8sArgs)
-		if err != nil {
-			return nil, nil, err
-		}
-		theEndpoint = &libcalico.Endpoint{}
-		theEndpoint.Name = hostVethName
-		theEndpoint.Labels = labels
-		theEndpoint.ProfileID = []string{profileID}
-	}
-
-	return result, theEndpoint, nil
-}
-
-func cmdAddNonK8s(args *skel.CmdArgs, conf NetConf, theEndpoint *libcalico.Endpoint) (*types.Result, *libcalico.Endpoint, error) {
-	var err error
-	var result *types.Result
-
-	profileID := conf.Name
-
-	if theEndpoint != nil {
-		// Don't create the veth or do any networking. Just update the profile on the endpoint. The profile will
-		// be created if needed during the profile processing step below.
-
-		// There's an existing endpoint - no need to create another. Find the IP address from the endpoint
-		// and use that in the response.
-		theEndpoint.ProfileID = append(theEndpoint.ProfileID, profileID)
-		result, err = createResultFromIP(theEndpoint.IPv4Nets[0])
-		if err != nil {
-			return nil, nil, err
-		}
-	} else {
-		// There's no existing endpoint, so we need to do the following:
-		// 1) Call the configured IPAM plugin to get IP address(es)
-		// 2) Create the veth, configuring it on both the host and container namespace.
-		// 3) Configure the calico endpoint
-
-		// 1) run the IPAM plugin and make sure there's an IPv4 address
-		result, err = ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
-		if err != nil {
-			return nil, nil, err
-		}
-		if result.IP4 == nil {
-			return nil, nil, errors.New("IPAM plugin returned missing IPv4 config")
-		}
-
-		// 2) Set up the veth
-		hostVethName, err := DoNetworking(args, conf, result)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		// 3) Update the endpoint
-		theEndpoint = &libcalico.Endpoint{}
-		theEndpoint.Name = hostVethName
-		theEndpoint.Labels = map[string]string{} //TODO is this needed?
-		theEndpoint.ProfileID = []string{profileID}
-	}
-	return result, theEndpoint, nil
-}
-
 func createResultFromIP(ip string) (*types.Result, error) {
 	existingIPv4 := types.IPConfig{}
 	theIP := fmt.Sprintf(`{"ip": "%s"}`, ip)
@@ -162,11 +56,9 @@ func createResultFromIP(ip string) (*types.Result, error) {
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
-	err := AddIgnoreUnknownArgs()
-	if err != nil {
+	if err := AddIgnoreUnknownArgs(); err != nil {
 		return err
 	}
-	var orchestratorID, workloadID string
 
 	// Unmarshall the network config, and perform validation
 	conf := NetConf{}
@@ -183,69 +75,103 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	// Determine if running under k8s by checking the CNI args
-	k8sArgs := K8sArgs{}
-	if args.Args != "" {
-		err := LoadArgs(args.Args, &k8sArgs)
-		if err != nil {
-			return err
-		}
-	}
-	RunningUnderK8s := string(k8sArgs.K8S_POD_NAMESPACE) != "" && string(k8sArgs.K8S_POD_NAME) != ""
-
-	if RunningUnderK8s {
-		workloadID = fmt.Sprintf("%s.%s", k8sArgs.K8S_POD_NAMESPACE, k8sArgs.K8S_POD_NAME)
-		orchestratorID = "k8s"
-	} else {
-		workloadID = args.ContainerID
-		orchestratorID = "cni"
-	}
-
-	// Get an existing workload/endpoint (if one exists).
-	theEndpoint, err := libcalico.GetEndpoint(
-		etcd, libcalico.Workload{
-			Hostname:       hostname,
-			OrchestratorID: orchestratorID,
-			WorkloadID:     workloadID})
-
-	fmt.Fprintf(os.Stderr, "Calico CNI checking for existing endpoint. endpoint=%v\n", theEndpoint)
-
+	runningUnderK8s, err := RunningUnderK8s(args)
 	if err != nil {
 		return err
 	}
 
+	//var orchestratorID, workloadID string
 	var result *types.Result
-	if RunningUnderK8s {
-		result, theEndpoint, err = cmdAddK8s(args, k8sArgs, conf, theEndpoint)
+	if runningUnderK8s {
+		result, err = CmdAddK8s(args, conf)
 		if err != nil {
 			return err
 		}
 	} else {
-		result, theEndpoint, err = cmdAddNonK8s(args, conf, theEndpoint)
+		// Not running in an environment that needs special casing.
+		workloadID := args.ContainerID
+		orchestratorID := "cni"
+		profileID := conf.Name
+
+		theEndpoint, err := libcalico.GetEndpoint(
+			etcd, libcalico.Workload{
+				Hostname:       hostname,
+				OrchestratorID: orchestratorID,
+				WorkloadID:     workloadID})
+
 		if err != nil {
 			return err
 		}
-	}
 
-	theEndpoint.OrchestratorID = orchestratorID
-	theEndpoint.WorkloadID = workloadID
-	theEndpoint.Hostname = hostname
-	theEndpoint.Mac = "EE:EE:EE:EE:EE:EE"
-	theEndpoint.State = "active"
-	theEndpoint.IPv6Nets = []string{}
-	theEndpoint.IPv4Nets = []string{result.IP4.IP.String()}
+		fmt.Fprintf(os.Stderr, "Calico CNI checking for existing endpoint. endpoint=%v\n", theEndpoint)
 
-	fmt.Fprintf(os.Stderr, "Calico CNI using IPv4=%s\n", result.IP4.IP.String())
-	// Write the endpoint object (either the newly created one, or the updated one with a new profileID).
-	if err := theEndpoint.Write(etcd); err != nil {
-		return err
+		if theEndpoint != nil {
+			// Don't create the veth or do any networking. Just update the profile on the endpoint. The profile will
+			// be created if needed during the profile processing step.
+
+			// There's an existing endpoint - no need to create another. Find the IP address from the endpoint
+			// and use that in the response.
+			fmt.Fprintf(os.Stderr, "Calico CNI appending networking profile=%s\n", profileID)
+			theEndpoint.ProfileIDs = append(theEndpoint.ProfileIDs, profileID)
+			result, err = createResultFromIP(theEndpoint.IPv4Nets[0])
+			if err != nil {
+				return err
+			}
+		} else {
+			// There's no existing endpoint, so we need to do the following:
+			// 1) Call the configured IPAM plugin to get IP address(es)
+			// 2) Create the veth, configuring it on both the host and container namespace.
+			// 3) Configure the calico endpoint
+
+			// 1) run the IPAM plugin and make sure there's an IP address returned.
+			result, err = ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
+			if err != nil {
+				return err
+			}
+
+			// TODO - the code doesn't actually handle IPv6 properly yet...
+			if result.IP4 == nil && result.IP6 == nil {
+				return errors.New("IPAM plugin did not return any IP addresses")
+			}
+
+			// 2) Set up the veth
+			hostVethName, err := DoNetworking(args, conf, result)
+			if err != nil {
+				return err
+			}
+
+			// 3) Create the endpoint object
+			theEndpoint = &libcalico.Endpoint{}
+			theEndpoint.Name = hostVethName
+			theEndpoint.Labels = map[string]string{} //TODO is this needed?
+			theEndpoint.ProfileIDs = []string{profileID}
+			theEndpoint.OrchestratorID = orchestratorID
+			theEndpoint.WorkloadID = workloadID
+			theEndpoint.Hostname = hostname
+			theEndpoint.Mac = "EE:EE:EE:EE:EE:EE"
+			theEndpoint.State = "active"
+
+			if result.IP4 != nil {
+				theEndpoint.IPv4Nets = []string{result.IP4.IP.String()}
+			}
+
+			if result.IP6 != nil {
+				theEndpoint.IPv6Nets = []string{result.IP6.IP.String()}
+			}
+			fmt.Fprintf(os.Stderr, "Calico CNI using IPv4=%s IPv6=%s\n", theEndpoint.IPv4Nets, theEndpoint.IPv6Nets)
+		}
+
+		// Write the endpoint object (either the newly created one, or the updated one with a new ProfileIDs).
+		if err := theEndpoint.Write(etcd); err != nil {
+			return err
+		}
 	}
 
 	// Handle profile creation.
 	// If Kubernetes is being used then profiles only need to be created if there is no policy block in the network
 	// config. If there is a policy block then "proper" policy is being used and the policy controller handles
 	// profile creation.
-	if !RunningUnderK8s || conf.Policy == nil {
+	if !runningUnderK8s || conf.Policy == nil {
 		//TODO - this is the wrong test. It should be on the policy type
 		// Start by checking if the profile already exists. If it already exists then there is no work to do (the CNI plugin never updates a profile).
 		exists, err := libcalico.ProfileExists(conf.Name, etcd)
@@ -262,7 +188,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 			fmt.Fprintf(os.Stderr, "Calico CNI creating profile. profile=%s\n", conf.Name)
 
 			var inboundRule []libcalico.Rule
-			if RunningUnderK8s {
+			if runningUnderK8s {
 				inboundRule = k8sInboundRule
 			} else {
 				inboundRule = tagInboundRule
@@ -289,11 +215,11 @@ func cmdDel(args *skel.CmdArgs) error {
 		return fmt.Errorf("failed to load netconf: %v", err)
 	}
 
-	// Always try to release the address
-	err := AddIgnoreUnknownArgs()
-	if err != nil {
+	if err := AddIgnoreUnknownArgs(); err != nil {
 		return err
 	}
+
+	// Always try to release the address
 	if err := ipam.ExecDel(n.IPAM.Type, args.StdinData); err != nil {
 		return err
 	}
@@ -309,8 +235,8 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 	var orchestratorId, workloadID string
 
-	RunningUnderK8s := string(k8sArgs.K8S_POD_NAMESPACE) != "" && string(k8sArgs.K8S_POD_NAME) != ""
-	if RunningUnderK8s {
+	runningUnderK8s := string(k8sArgs.K8S_POD_NAMESPACE) != "" && string(k8sArgs.K8S_POD_NAME) != ""
+	if runningUnderK8s {
 		workloadID = fmt.Sprintf("%s.%s", k8sArgs.K8S_POD_NAMESPACE, k8sArgs.K8S_POD_NAME)
 		orchestratorId = "k8s"
 	} else {
@@ -350,6 +276,8 @@ func cmdDel(args *skel.CmdArgs) error {
 var VERSION string
 
 func main() {
+	// Display the version on "-v", otherwise just delagate to the skel code.
+	// Use a new flag set so as not to conflict with existing libaries which use "flag"
 	flagSet := flag.NewFlagSet("Calico", flag.ExitOnError)
 
 	version := flagSet.Bool("v", false, "Display version")

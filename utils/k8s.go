@@ -2,6 +2,17 @@
 
 package utils
 
+import (
+	"errors"
+	"fmt"
+	"os"
+
+	"github.com/containernetworking/cni/pkg/ipam"
+	"github.com/containernetworking/cni/pkg/skel"
+	"github.com/containernetworking/cni/pkg/types"
+	"github.com/projectcalico/libcalico/lib"
+)
+
 //
 //import (
 //	"fmt"
@@ -11,6 +22,103 @@ package utils
 //	k8sClient "k8s.io/kubernetes/pkg/client/unversioned"
 //)
 //
+
+func RunningUnderK8s(args *skel.CmdArgs) (bool, error) {
+
+	// Determine if running under k8s by checking the CNI args
+	k8sArgs := K8sArgs{}
+	if args.Args != "" {
+		err := LoadArgs(args.Args, &k8sArgs)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return string(k8sArgs.K8S_POD_NAMESPACE) != "" && string(k8sArgs.K8S_POD_NAME) != "", nil
+}
+
+func CmdAddK8s(args *skel.CmdArgs, k8sArgs K8sArgs, conf NetConf, (*types.Result, error) {
+	var err error
+	var result *types.Result
+
+	etcd, err := libcalico.GetKeysAPI(conf.EtcdAuthority, conf.EtcdEndpoints)
+	if err != nil {
+		return err
+	}
+
+	ProfileIDs := fmt.Sprintf("k8s_ns.%s", k8sArgs.K8S_POD_NAMESPACE)
+
+	workloadID = fmt.Sprintf("%s.%s", k8sArgs.K8S_POD_NAMESPACE, k8sArgs.K8S_POD_NAME)
+	orchestratorID = "k8s"
+
+	theEndpoint, err := libcalico.GetEndpoint(
+		etcd, libcalico.Workload{
+			Hostname:       hostname,
+			OrchestratorID: orchestratorID,
+			WorkloadID:     workloadID})
+
+	fmt.Fprintf(os.Stderr, "Calico CNI checking for existing endpoint. endpoint=%v\n", theEndpoint)
+
+	if err != nil {
+		return err
+	}
+
+	if theEndpoint != nil {
+		// This happens when Docker or the node restarts. K8s calls CNI with the same details as before.
+		// Do the networking but no etcd changes should be required.
+		// There's an existing endpoint - no need to create another. Find the IP address from the endpoint
+		// and use that in the response.
+		result, err = createResultFromIP(theEndpoint.IPv4Nets[0])
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// We're assuming that the endpoint is fine and doesn't need to be changed.
+		// However, the veth does need to be recreated since the namespace has been lost.
+		_, err := DoNetworking(args, conf, result)
+		if err != nil {
+			return nil, nil, err
+		}
+		// TODO - what if labels changed during the restart?
+		// TODO - the veth name needs updating...
+
+	} else {
+		// There's no existing endpoint, so we need to do the following:
+		// 1) Call the configured IPAM plugin to get IP address(es)
+		// 2) Create the veth, configuring it on both the host and container namespace.
+		// 3) Configure the calico endpoint
+
+		// 1) run the IPAM plugin and make sure there's an IPv4 address
+		result, err = ipam.ExecAdd(conf.IPAM.Type, args.StdinData)
+		if err != nil {
+			return nil, nil, err
+		}
+		if result.IP4 == nil {
+			return nil, nil, errors.New("IPAM plugin returned missing IPv4 config")
+		}
+
+		// 2) Set up the veth
+		hostVethName, err := DoNetworking(args, conf, result)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// 3) Update the endpoint
+		labels, err := GetK8sLabels(conf, k8sArgs)
+		if err != nil {
+			return nil, nil, err
+		}
+		theEndpoint = &libcalico.Endpoint{}
+		theEndpoint.Name = hostVethName
+		theEndpoint.Labels = labels
+		theEndpoint.ProfileIDs = []string{ProfileIDs}
+	}
+
+	theEndpoint.OrchestratorID = orchestratorID
+	theEndpoint.WorkloadID = workloadID
+
+	return result, theEndpoint, nil
+}
+
 //func GetK8sLabels(conf NetConf, k8sargs K8sArgs) (map[string]string, error) {
 //	apiRoot := conf.Policy.K8sApiRoot
 //	if apiRoot == "" {

@@ -69,6 +69,7 @@ func cmdAdd(args *skel.CmdArgs) error {
 	//TODO - does this code need to fetch the pools or should ipamClient do it automatically.
 	_, pool, _ := net.ParseCIDR("192.168.0.0/16")
 
+	// TODO - Use the workloadID as the handle (i.e. need to know about k8s)
 	addresses, _, _ := ipamClient.AutoAssign(1, 0, "", map[string]string{}, nil, pool, nil)
 
 	ipNetwork := net.IPNet{IP: addresses[0], Mask: net.CIDRMask(32, 32)}
@@ -86,6 +87,16 @@ func cmdDel(args *skel.CmdArgs) error {
 	}
 
 	//TODO  - need to release the address - but don't have an API yet
+	// Release by handle - which is worloadID.
 
 	return nil
 }
+
+//TODO: Add ability to control IPv4 vs IPv6 assignment
+// TODO - Tests - all have an add and delete
+// k8s vs non-k8s
+// ipv4 vs ipv6 in network config
+// IP in the CNI args
+
+
+
