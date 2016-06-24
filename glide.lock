@@ -1,17 +1,20 @@
 hash: f154ddee0ea819f492010df967b8a1b3e9ece3d366054851a376c9f1527f34e4
-updated: 2016-06-10T14:32:41.403429017-07:00
+updated: 2016-06-24T16:04:35.016428389-07:00
 imports:
 - name: github.com/containernetworking/cni
-  version: c3c08038177dfc3900b11ce54de55648d4b95184
+  version: b8e92ed030588120f9fda47dd359e17a3234142d
   subpackages:
   - pkg/ip
   - pkg/ipam
   - pkg/ns
   - pkg/skel
   - pkg/types
+  - libcni
   - pkg/invoke
+  - plugins/ipam/host-local/backend
+  - plugins/ipam/host-local/backend/disk
 - name: github.com/coreos/etcd
-  version: bb6102c00ce157b79357de98a585d4607eb32989
+  version: 0c820dc7ba8baefafbb10318819ec24187bffde5
   subpackages:
   - client
   - pkg/pathutil
@@ -20,8 +23,22 @@ imports:
   version: fbb73372b87f6e89951c2b6b31470c2c9d5cfae3
   subpackages:
   - iptables
+- name: github.com/coreos/go-systemd
+  version: 2688e91251d9d8e404e86dd8f096e23b2f086958
+  subpackages:
+  - activation
+- name: github.com/d2g/dhcp4
+  version: f0e4d29ff0231dce36e250b2ed9ff08412584bca
+- name: github.com/d2g/dhcp4client
+  version: bed07e1bc5b85f69c6f0fd73393aa35ec68ed892
 - name: github.com/dchest/uniuri
   version: 8902c56451e9b58ff940bbe5fec35d5f9c04584a
+- name: github.com/golang/protobuf
+  version: 0c1f6d65b5a189c2250d10e71a5506f06f9fa0a0
+  subpackages:
+  - proto
+  - proto/testdata
+  - ptypes/any
 - name: github.com/onsi/ginkgo
   version: 7f8ab55aaf3b86885aa55b762e803744d1674700
   subpackages:
@@ -39,12 +56,16 @@ imports:
   - reporters
   - reporters/stenographer
   - types
+  - ginkgo/convert
+  - ginkgo/interrupthandler
+  - ginkgo/nodot
+  - ginkgo/testrunner
+  - ginkgo/testsuite
+  - ginkgo/watch
 - name: github.com/onsi/gomega
   version: 2152b45fa28a361beba9aab0885972323a444e28
   subpackages:
   - gexec
-  - format
-  - gbytes
   - internal/assertion
   - internal/asyncassertion
   - internal/testingtsupport
@@ -56,7 +77,7 @@ imports:
   - matchers/support/goraph/node
   - matchers/support/goraph/util
 - name: github.com/projectcalico/libcalico
-  version: cb5f0818463af8c738da7f90335d5d6076b914d0
+  version: 0658d845b63fb4376443ac96b01ac32518d66391
   repo: git@github.com:tomdee/libcalico.git
   vcs: git
   subpackages:
@@ -73,7 +94,7 @@ imports:
   subpackages:
   - nl
 - name: golang.org/x/net
-  version: 3f122ce3dbbe488b7e6a8bdb26f41edec852a40b
+  version: bc3663df0ac92f928d419e31e0d2af22e683a5a2
   subpackages:
   - context
 - name: golang.org/x/sys

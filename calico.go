@@ -153,10 +153,14 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 			if result.IP4 != nil {
 				theEndpoint.IPv4Nets = []string{result.IP4.IP.String()}
+			} else {
+				theEndpoint.IPv4Nets = []string{}
 			}
 
 			if result.IP6 != nil {
 				theEndpoint.IPv6Nets = []string{result.IP6.IP.String()}
+			} else {
+				theEndpoint.IPv6Nets = []string{}
 			}
 			fmt.Fprintf(os.Stderr, "Calico CNI using IPv4=%s IPv6=%s\n", theEndpoint.IPv4Nets, theEndpoint.IPv6Nets)
 		}

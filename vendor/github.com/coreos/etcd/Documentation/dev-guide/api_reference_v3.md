@@ -1,6 +1,9 @@
 ### etcd API Reference
 
 
+This is a generated documentation. Please read the proto files for more.
+
+
 ##### service `Auth` (etcdserver/etcdserverpb/rpc.proto)
 
 | Method | Request Type | Response Type | Description |
@@ -9,13 +12,15 @@
 | AuthDisable | AuthDisableRequest | AuthDisableResponse | AuthDisable disables authentication. |
 | Authenticate | AuthenticateRequest | AuthenticateResponse | Authenticate processes an authenticate request. |
 | UserAdd | AuthUserAddRequest | AuthUserAddResponse | UserAdd adds a new user. |
-| UserGet | AuthUserGetRequest | AuthUserGetResponse | UserGet gets detailed user information or lists all users. |
+| UserGet | AuthUserGetRequest | AuthUserGetResponse | UserGet gets detailed user information. |
+| UserList | AuthUserListRequest | AuthUserListResponse | UserList gets a list of all users. |
 | UserDelete | AuthUserDeleteRequest | AuthUserDeleteResponse | UserDelete deletes a specified user. |
 | UserChangePassword | AuthUserChangePasswordRequest | AuthUserChangePasswordResponse | UserChangePassword changes the password of a specified user. |
 | UserGrantRole | AuthUserGrantRoleRequest | AuthUserGrantRoleResponse | UserGrant grants a role to a specified user. |
 | UserRevokeRole | AuthUserRevokeRoleRequest | AuthUserRevokeRoleResponse | UserRevokeRole revokes a role of specified user. |
 | RoleAdd | AuthRoleAddRequest | AuthRoleAddResponse | RoleAdd adds a new role. |
-| RoleGet | AuthRoleGetRequest | AuthRoleGetResponse | RoleGet gets detailed role information or lists all roles. |
+| RoleGet | AuthRoleGetRequest | AuthRoleGetResponse | RoleGet gets detailed role information. |
+| RoleList | AuthRoleListRequest | AuthRoleListResponse | RoleList gets lists of all roles. |
 | RoleDelete | AuthRoleDeleteRequest | AuthRoleDeleteResponse | RoleDelete deletes a specified role. |
 | RoleGrantPermission | AuthRoleGrantPermissionRequest | AuthRoleGrantPermissionResponse | RoleGrantPermission grants a permission of a specified key or range to a specified role. |
 | RoleRevokePermission | AuthRoleRevokePermissionRequest | AuthRoleRevokePermissionResponse | RoleRevokePermission revokes a key or range permission of a specified role. |
@@ -34,6 +39,8 @@
 
 
 ##### service `KV` (etcdserver/etcdserverpb/rpc.proto)
+
+for grpc-gateway
 
 | Method | Request Type | Response Type | Description |
 | ------ | ------------ | ------------- | ----------- |
@@ -85,6 +92,8 @@
 
 
 ##### message `AlarmRequest` (etcdserver/etcdserverpb/rpc.proto)
+
+default, used to query if any alarm is active space quota is exhausted
 
 | Field | Description | Type |
 | ----- | ----------- | ---- |
@@ -197,6 +206,21 @@ Empty field.
 
 
 
+##### message `AuthRoleListRequest` (etcdserver/etcdserverpb/rpc.proto)
+
+Empty field.
+
+
+
+##### message `AuthRoleListResponse` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| header |  | ResponseHeader |
+| roles |  | (slice of) string |
+
+
+
 ##### message `AuthRoleRevokePermissionRequest` (etcdserver/etcdserverpb/rpc.proto)
 
 | Field | Description | Type |
@@ -296,6 +320,21 @@ Empty field.
 | Field | Description | Type |
 | ----- | ----------- | ---- |
 | header |  | ResponseHeader |
+
+
+
+##### message `AuthUserListRequest` (etcdserver/etcdserverpb/rpc.proto)
+
+Empty field.
+
+
+
+##### message `AuthUserListResponse` (etcdserver/etcdserverpb/rpc.proto)
+
+| Field | Description | Type |
+| ----- | ----------- | ---- |
+| header |  | ResponseHeader |
+| users |  | (slice of) string |
 
 
 
@@ -567,10 +606,10 @@ Empty field.
 
 | Field | Description | Type |
 | ----- | ----------- | ---- |
-| key | key is the first key for the range. If range_end is not given, the request only looks up key. | bytes |
+| key | default, no sorting lowest target value first highest target value first key is the first key for the range. If range_end is not given, the request only looks up key. | bytes |
 | range_end | range_end is the upper bound on the requested range [key, range_end). If range_end is '\0', the range is all keys >= key. If the range_end is one bit larger than the given key, then the range requests get the all keys with the prefix (the given key). If both key and range_end are '\0', then range requests returns all keys. | bytes |
 | limit | limit is a limit on the number of keys returned for the request. | int64 |
-| revision | revision is the point-in-time of the key-value store to use for the range. If revision is less or equal to zero, the range is over the newest key-value store. If the revision has been compacted, ErrCompaction is returned as a response. | int64 |
+| revision | revision is the point-in-time of the key-value store to use for the range. If revision is less or equal to zero, the range is over the newest key-value store. If the revision has been compacted, ErrCompacted is returned as a response. | int64 |
 | sort_order | sort_order is the order for returned sorted results. | SortOrder |
 | sort_target | sort_target is the key-value field to use for sorting. | SortTarget |
 | serializable | serializable sets the range request to use serializable member-local reads. Range requests are linearizable by default; linearizable requests have higher latency and lower throughput than serializable requests but reflect the current consensus of the cluster. For better performance, in exchange for possible stale reads, a serializable range request is served locally without needing to reach consensus with other nodes in the cluster. | bool |

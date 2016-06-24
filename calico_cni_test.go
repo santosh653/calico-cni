@@ -27,6 +27,7 @@ import (
 //})
 
 var _ = Describe("CalicoCni", func() {
+	hostname, _ := os.Hostname()
 	BeforeEach(func() {
 		cmd := fmt.Sprintf("etcdctl --endpoints http://%s:2379 rm /calico --recursive | true", os.Getenv("ETCD_IP"))
 		session, err := gexec.Start(exec.Command("bash", "-c", cmd), GinkgoWriter, GinkgoWriter)
@@ -69,9 +70,9 @@ var _ = Describe("CalicoCni", func() {
 				}
 
 				// The endpoint is created in etcd
-				endpoint_path := Cmd(fmt.Sprintf("etcdctl --endpoints http://%s:2379 ls /calico/v1/host/%s/workload/cni/%s --recursive |tail -1", os.Getenv("ETCD_IP"), os.Getenv("HOSTNAME"), containerID))
-				endpoint := GetEtcdString(endpoint_path)
+				endpoint_path := Cmd(fmt.Sprintf("etcdctl --endpoints http://%s:2379 ls /calico/v1/host/%s/workload/cni/%s --recursive |tail -1", os.Getenv("ETCD_IP"), hostname, containerID))
 				Expect(endpoint_path).Should(ContainSubstring(containerID))
+				endpoint := GetEtcdString(endpoint_path)
 				Expect(endpoint).Should(MatchJSON(fmt.Sprintf(`{"state":"active","name":"cali%s","mac":"EE:EE:EE:EE:EE:EE","profile_ids":["net1"],"ipv4_nets":["%s/8"],"ipv6_nets":[]}`, containerID, ip)))
 
 				// Routes and interface on host - there's is nothing to assert on the routes since felix adds those.
@@ -134,7 +135,7 @@ var _ = Describe("CalicoCni", func() {
 				}
 
 				// The endpoint is created in etcd
-				endpoint_path := Cmd(fmt.Sprintf("etcdctl --endpoints http://%s:2379 ls /calico/v1/host/%s/workload/cni/%s --recursive |tail -1", os.Getenv("ETCD_IP"), os.Getenv("HOSTNAME"), containerID))
+				endpoint_path := Cmd(fmt.Sprintf("etcdctl --endpoints http://%s:2379 ls /calico/v1/host/%s/workload/cni/%s --recursive |tail -1", os.Getenv("ETCD_IP"), hostname, containerID))
 				endpoint := GetEtcdString(endpoint_path)
 				Expect(endpoint_path).Should(ContainSubstring(containerID))
 				Expect(endpoint).Should(MatchJSON(fmt.Sprintf(`{"state":"active","name":"cali%s","mac":"EE:EE:EE:EE:EE:EE","profile_ids":["net1"],"ipv4_nets":["%s/32"],"ipv6_nets":[]}`, containerID, ip)))

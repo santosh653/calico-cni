@@ -18,8 +18,8 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"time"
 
-	"github.com/coreos/etcd/auth"
 	pb "github.com/coreos/etcd/etcdserver/etcdserverpb"
 	"github.com/coreos/etcd/lease"
 	"github.com/coreos/etcd/mvcc"
@@ -34,6 +34,8 @@ const (
 	// To apply with independent Range, Put, Delete, you can pass noTxn
 	// to apply functions instead of a valid txn ID.
 	noTxn = -1
+
+	warnApplyDuration = 10 * time.Millisecond
 )
 
 type applyResult struct {
@@ -47,6 +49,8 @@ type applyResult struct {
 
 // applierV3 is the interface for processing V3 raft messages
 type applierV3 interface {
+	Apply(r *pb.InternalRaftRequest) *applyResult
+
 	Put(txnID int64, p *pb.PutRequest) (*pb.PutResponse, error)
 	Range(txnID int64, r *pb.RangeRequest) (*pb.RangeResponse, error)
 	DeleteRange(txnID int64, dr *pb.DeleteRangeRequest) (*pb.DeleteRangeResponse, error)
@@ -58,9 +62,11 @@ type applierV3 interface {
 
 	Alarm(*pb.AlarmRequest) (*pb.AlarmResponse, error)
 
+	Authenticate(r *pb.InternalAuthenticateRequest) (*pb.AuthenticateResponse, error)
+
 	AuthEnable() (*pb.AuthEnableResponse, error)
 	AuthDisable() (*pb.AuthDisableResponse, error)
-	Authenticate(ctx context.Context, username, password string) (*pb.AuthenticateResponse, error)
+
 	UserAdd(ua *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse, error)
 	UserDelete(ua *pb.AuthUserDeleteRequest) (*pb.AuthUserDeleteResponse, error)
 	UserChangePassword(ua *pb.AuthUserChangePasswordRequest) (*pb.AuthUserChangePasswordResponse, error)
@@ -72,76 +78,74 @@ type applierV3 interface {
 	RoleGet(ua *pb.AuthRoleGetRequest) (*pb.AuthRoleGetResponse, error)
 	RoleRevokePermission(ua *pb.AuthRoleRevokePermissionRequest) (*pb.AuthRoleRevokePermissionResponse, error)
 	RoleDelete(ua *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDeleteResponse, error)
+	UserList(ua *pb.AuthUserListRequest) (*pb.AuthUserListResponse, error)
+	RoleList(ua *pb.AuthRoleListRequest) (*pb.AuthRoleListResponse, error)
 }
 
 type applierV3backend struct {
 	s *EtcdServer
 }
 
-func (s *EtcdServer) applyV3Request(r *pb.InternalRaftRequest) *applyResult {
+func (s *EtcdServer) newApplierV3() applierV3 {
+	return newAuthApplierV3(
+		s.AuthStore(),
+		newQuotaApplierV3(s, &applierV3backend{s}),
+	)
+}
+
+func (a *applierV3backend) Apply(r *pb.InternalRaftRequest) *applyResult {
 	ar := &applyResult{}
-	username := r.Header.Username
 
-	if needAdminPermission(r) && !s.AuthStore().IsAdminPermitted(username) {
-		ar.err = auth.ErrPermissionDenied
-		return ar
-	}
-
+	// call into a.s.applyV3.F instead of a.F so upper appliers can check individual calls
 	switch {
 	case r.Range != nil:
-		if s.AuthStore().IsRangePermitted(r.Header, string(r.Range.Key), string(r.Range.RangeEnd)) {
-			ar.resp, ar.err = s.applyV3.Range(noTxn, r.Range)
-		} else {
-			ar.err = auth.ErrPermissionDenied
-		}
+		ar.resp, ar.err = a.s.applyV3.Range(noTxn, r.Range)
 	case r.Put != nil:
-		if s.AuthStore().IsPutPermitted(r.Header, string(r.Put.Key)) {
-			ar.resp, ar.err = s.applyV3.Put(noTxn, r.Put)
-		} else {
-			ar.err = auth.ErrPermissionDenied
-		}
+		ar.resp, ar.err = a.s.applyV3.Put(noTxn, r.Put)
 	case r.DeleteRange != nil:
-		ar.resp, ar.err = s.applyV3.DeleteRange(noTxn, r.DeleteRange)
+		ar.resp, ar.err = a.s.applyV3.DeleteRange(noTxn, r.DeleteRange)
 	case r.Txn != nil:
-		ar.resp, ar.err = s.applyV3.Txn(r.Txn)
+		ar.resp, ar.err = a.s.applyV3.Txn(r.Txn)
 	case r.Compaction != nil:
-		ar.resp, ar.physc, ar.err = s.applyV3.Compaction(r.Compaction)
+		ar.resp, ar.physc, ar.err = a.s.applyV3.Compaction(r.Compaction)
 	case r.LeaseGrant != nil:
-		ar.resp, ar.err = s.applyV3.LeaseGrant(r.LeaseGrant)
+		ar.resp, ar.err = a.s.applyV3.LeaseGrant(r.LeaseGrant)
 	case r.LeaseRevoke != nil:
-		ar.resp, ar.err = s.applyV3.LeaseRevoke(r.LeaseRevoke)
+		ar.resp, ar.err = a.s.applyV3.LeaseRevoke(r.LeaseRevoke)
 	case r.Alarm != nil:
-		ar.resp, ar.err = s.applyV3.Alarm(r.Alarm)
-
-	case r.AuthEnable != nil:
-		ar.resp, ar.err = s.applyV3.AuthEnable()
-	case r.AuthDisable != nil:
-		ar.resp, ar.err = s.applyV3.AuthDisable()
+		ar.resp, ar.err = a.s.applyV3.Alarm(r.Alarm)
 	case r.Authenticate != nil:
-		ctx := context.WithValue(context.WithValue(context.TODO(), "index", s.consistIndex.ConsistentIndex()), "simpleToken", r.Authenticate.SimpleToken)
-		ar.resp, ar.err = s.applyV3.Authenticate(ctx, r.Authenticate.Name, r.Authenticate.Password)
+		ar.resp, ar.err = a.s.applyV3.Authenticate(r.Authenticate)
+	case r.AuthEnable != nil:
+		ar.resp, ar.err = a.s.applyV3.AuthEnable()
+	case r.AuthDisable != nil:
+		ar.resp, ar.err = a.s.applyV3.AuthDisable()
 	case r.AuthUserAdd != nil:
-		ar.resp, ar.err = s.applyV3.UserAdd(r.AuthUserAdd)
+		ar.resp, ar.err = a.s.applyV3.UserAdd(r.AuthUserAdd)
 	case r.AuthUserDelete != nil:
-		ar.resp, ar.err = s.applyV3.UserDelete(r.AuthUserDelete)
+		ar.resp, ar.err = a.s.applyV3.UserDelete(r.AuthUserDelete)
 	case r.AuthUserChangePassword != nil:
-		ar.resp, ar.err = s.applyV3.UserChangePassword(r.AuthUserChangePassword)
+		ar.resp, ar.err = a.s.applyV3.UserChangePassword(r.AuthUserChangePassword)
 	case r.AuthUserGrantRole != nil:
-		ar.resp, ar.err = s.applyV3.UserGrantRole(r.AuthUserGrantRole)
+		ar.resp, ar.err = a.s.applyV3.UserGrantRole(r.AuthUserGrantRole)
 	case r.AuthUserGet != nil:
-		ar.resp, ar.err = s.applyV3.UserGet(r.AuthUserGet)
+		ar.resp, ar.err = a.s.applyV3.UserGet(r.AuthUserGet)
 	case r.AuthUserRevokeRole != nil:
-		ar.resp, ar.err = s.applyV3.UserRevokeRole(r.AuthUserRevokeRole)
+		ar.resp, ar.err = a.s.applyV3.UserRevokeRole(r.AuthUserRevokeRole)
 	case r.AuthRoleAdd != nil:
-		ar.resp, ar.err = s.applyV3.RoleAdd(r.AuthRoleAdd)
+		ar.resp, ar.err = a.s.applyV3.RoleAdd(r.AuthRoleAdd)
 	case r.AuthRoleGrantPermission != nil:
-		ar.resp, ar.err = s.applyV3.RoleGrantPermission(r.AuthRoleGrantPermission)
+		ar.resp, ar.err = a.s.applyV3.RoleGrantPermission(r.AuthRoleGrantPermission)
 	case r.AuthRoleGet != nil:
-		ar.resp, ar.err = s.applyV3.RoleGet(r.AuthRoleGet)
+		ar.resp, ar.err = a.s.applyV3.RoleGet(r.AuthRoleGet)
 	case r.AuthRoleRevokePermission != nil:
-		ar.resp, ar.err = s.applyV3.RoleRevokePermission(r.AuthRoleRevokePermission)
+		ar.resp, ar.err = a.s.applyV3.RoleRevokePermission(r.AuthRoleRevokePermission)
 	case r.AuthRoleDelete != nil:
-		ar.resp, ar.err = s.applyV3.RoleDelete(r.AuthRoleDelete)
+		ar.resp, ar.err = a.s.applyV3.RoleDelete(r.AuthRoleDelete)
+	case r.AuthUserList != nil:
+		ar.resp, ar.err = a.s.applyV3.UserList(r.AuthUserList)
+	case r.AuthRoleList != nil:
+		ar.resp, ar.err = a.s.applyV3.RoleList(r.AuthRoleList)
 	default:
 		panic("not implemented")
 	}
@@ -206,8 +210,7 @@ func (a *applierV3backend) Range(txnID int64, r *pb.RangeRequest) (*pb.RangeResp
 	resp.Header = &pb.ResponseHeader{}
 
 	var (
-		kvs []mvccpb.KeyValue
-		rev int64
+		rr  *mvcc.RangeResult
 		err error
 	)
 
@@ -225,13 +228,19 @@ func (a *applierV3backend) Range(txnID int64, r *pb.RangeRequest) (*pb.RangeResp
 		limit = limit + 1
 	}
 
+	ro := mvcc.RangeOptions{
+		Limit: limit,
+		Rev:   r.Revision,
+		Count: r.CountOnly,
+	}
+
 	if txnID != noTxn {
-		kvs, rev, err = a.s.KV().TxnRange(txnID, r.Key, r.RangeEnd, limit, r.Revision)
+		rr, err = a.s.KV().TxnRange(txnID, r.Key, r.RangeEnd, ro)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		kvs, rev, err = a.s.KV().Range(r.Key, r.RangeEnd, limit, r.Revision)
+		rr, err = a.s.KV().Range(r.Key, r.RangeEnd, ro)
 		if err != nil {
 			return nil, err
 		}
@@ -241,15 +250,15 @@ func (a *applierV3backend) Range(txnID int64, r *pb.RangeRequest) (*pb.RangeResp
 		var sorter sort.Interface
 		switch {
 		case r.SortTarget == pb.RangeRequest_KEY:
-			sorter = &kvSortByKey{&kvSort{kvs}}
+			sorter = &kvSortByKey{&kvSort{rr.KVs}}
 		case r.SortTarget == pb.RangeRequest_VERSION:
-			sorter = &kvSortByVersion{&kvSort{kvs}}
+			sorter = &kvSortByVersion{&kvSort{rr.KVs}}
 		case r.SortTarget == pb.RangeRequest_CREATE:
-			sorter = &kvSortByCreate{&kvSort{kvs}}
+			sorter = &kvSortByCreate{&kvSort{rr.KVs}}
 		case r.SortTarget == pb.RangeRequest_MOD:
-			sorter = &kvSortByMod{&kvSort{kvs}}
+			sorter = &kvSortByMod{&kvSort{rr.KVs}}
 		case r.SortTarget == pb.RangeRequest_VALUE:
-			sorter = &kvSortByValue{&kvSort{kvs}}
+			sorter = &kvSortByValue{&kvSort{rr.KVs}}
 		}
 		switch {
 		case r.SortOrder == pb.RangeRequest_ASCEND:
@@ -259,14 +268,18 @@ func (a *applierV3backend) Range(txnID int64, r *pb.RangeRequest) (*pb.RangeResp
 		}
 	}
 
-	if r.Limit > 0 && len(kvs) > int(r.Limit) {
-		kvs = kvs[:r.Limit]
+	if r.Limit > 0 && len(rr.KVs) > int(r.Limit) {
+		rr.KVs = rr.KVs[:r.Limit]
 		resp.More = true
 	}
 
-	resp.Header.Revision = rev
-	for i := range kvs {
-		resp.Kvs = append(resp.Kvs, &kvs[i])
+	resp.Header.Revision = rr.Rev
+	resp.Count = int64(rr.Count)
+	for i := range rr.KVs {
+		if r.KeysOnly {
+			rr.KVs[i].Value = nil
+		}
+		resp.Kvs = append(resp.Kvs, &rr.KVs[i])
 	}
 	return resp, nil
 }
@@ -330,7 +343,9 @@ func (a *applierV3backend) Txn(rt *pb.TxnRequest) (*pb.TxnResponse, error) {
 // It returns the revision at which the comparison happens. If the comparison
 // succeeds, the it returns true. Otherwise it returns false.
 func (a *applierV3backend) applyCompare(c *pb.Compare) (int64, bool) {
-	ckvs, rev, err := a.s.KV().Range(c.Key, nil, 1, 0)
+	rr, err := a.s.KV().Range(c.Key, nil, mvcc.RangeOptions{})
+	rev := rr.Rev
+
 	if err != nil {
 		if err == mvcc.ErrTxnIDMismatch {
 			panic("unexpected txn ID mismatch error")
@@ -338,8 +353,8 @@ func (a *applierV3backend) applyCompare(c *pb.Compare) (int64, bool) {
 		return rev, false
 	}
 	var ckv mvccpb.KeyValue
-	if len(ckvs) != 0 {
-		ckv = ckvs[0]
+	if len(rr.KVs) != 0 {
+		ckv = rr.KVs[0]
 	} else {
 		// Use the zero value of ckv normally. However...
 		if c.Target == pb.Compare_VALUE {
@@ -436,7 +451,8 @@ func (a *applierV3backend) Compaction(compaction *pb.CompactionRequest) (*pb.Com
 		return nil, ch, err
 	}
 	// get the current revision. which key to get is not important.
-	_, resp.Header.Revision, _ = a.s.KV().Range([]byte("compaction"), nil, 1, 0)
+	rr, _ := a.s.KV().Range([]byte("compaction"), nil, mvcc.RangeOptions{})
+	resp.Header.Revision = rr.Rev
 	return resp, ch, err
 }
 
@@ -496,7 +512,7 @@ func (a *applierV3backend) Alarm(ar *pb.AlarmRequest) (*pb.AlarmResponse, error)
 		switch m.Alarm {
 		case pb.AlarmType_NOSPACE:
 			plog.Infof("alarm disarmed %+v", ar)
-			a.s.applyV3 = newQuotaApplierV3(a.s, &applierV3backend{a.s})
+			a.s.applyV3 = a.s.newApplierV3()
 		default:
 			plog.Errorf("unimplemented alarm deactivation (%+v)", m)
 		}
@@ -543,8 +559,9 @@ func (a *applierV3backend) AuthDisable() (*pb.AuthDisableResponse, error) {
 	return &pb.AuthDisableResponse{}, nil
 }
 
-func (a *applierV3backend) Authenticate(ctx context.Context, username, password string) (*pb.AuthenticateResponse, error) {
-	return a.s.AuthStore().Authenticate(ctx, username, password)
+func (a *applierV3backend) Authenticate(r *pb.InternalAuthenticateRequest) (*pb.AuthenticateResponse, error) {
+	ctx := context.WithValue(context.WithValue(context.TODO(), "index", a.s.consistIndex.ConsistentIndex()), "simpleToken", r.SimpleToken)
+	return a.s.AuthStore().Authenticate(ctx, r.Name, r.Password)
 }
 
 func (a *applierV3backend) UserAdd(r *pb.AuthUserAddRequest) (*pb.AuthUserAddResponse, error) {
@@ -589,6 +606,14 @@ func (a *applierV3backend) RoleRevokePermission(r *pb.AuthRoleRevokePermissionRe
 
 func (a *applierV3backend) RoleDelete(r *pb.AuthRoleDeleteRequest) (*pb.AuthRoleDeleteResponse, error) {
 	return a.s.AuthStore().RoleDelete(r)
+}
+
+func (a *applierV3backend) UserList(r *pb.AuthUserListRequest) (*pb.AuthUserListResponse, error) {
+	return a.s.AuthStore().UserList(r)
+}
+
+func (a *applierV3backend) RoleList(r *pb.AuthRoleListRequest) (*pb.AuthRoleListResponse, error) {
+	return a.s.AuthStore().RoleList(r)
 }
 
 type quotaApplierV3 struct {
@@ -719,37 +744,4 @@ func compareInt64(a, b int64) int {
 // sending empty byte strings as nil; >= is encoded in the range end as '\0'.
 func isGteRange(rangeEnd []byte) bool {
 	return len(rangeEnd) == 1 && rangeEnd[0] == 0
-}
-
-func needAdminPermission(r *pb.InternalRaftRequest) bool {
-	switch {
-	case r.AuthEnable != nil:
-		return true
-	case r.AuthDisable != nil:
-		return true
-	case r.AuthUserAdd != nil:
-		return true
-	case r.AuthUserDelete != nil:
-		return true
-	case r.AuthUserChangePassword != nil:
-		return true
-	case r.AuthUserGrantRole != nil:
-		return true
-	case r.AuthUserGet != nil:
-		return true
-	case r.AuthUserRevokeRole != nil:
-		return true
-	case r.AuthRoleAdd != nil:
-		return true
-	case r.AuthRoleGrantPermission != nil:
-		return true
-	case r.AuthRoleGet != nil:
-		return true
-	case r.AuthRoleRevokePermission != nil:
-		return true
-	case r.AuthRoleDelete != nil:
-		return true
-	default:
-		return false
-	}
 }

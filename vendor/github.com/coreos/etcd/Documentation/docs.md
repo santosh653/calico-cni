@@ -4,15 +4,17 @@ etcd is a distributed key-value store designed to reliably and quickly preserve 
 
 ## Getting started
 
-New etcd users and developers should get started by [downloading and building][download_build] etcd. Once you have etcd, follow this [quick demo][demo] to see the basics of creating and working with an etcd cluster.
+New etcd users and developers should get started by [downloading and building][download_build] etcd. After getting etcd, follow this [quick demo][demo] to see the basics of creating and working with an etcd cluster.
 
 ## Developing with etcd
 
-The easiest way to get started using etcd as a distributed key-value store for your applications is to [set up a local cluster][local_cluster].
+The easiest way to get started using etcd as a distributed key-value store is to [set up a local cluster][local_cluster].
 
  - [Setting up local clusters][local_cluster]
  - [Interacting with etcd][interacting]
  - [API references][api_ref]
+ - [gRPC gateway][api_grpc_gateway]
+ - [Experimental features and APIs][experimental]
 
 ## Operating etcd clusters
 
@@ -27,15 +29,18 @@ Administrators who need to create reliable and scalable key-value stores for the
  - [Understand failures][failures]
  - [Disaster recovery][recovery]
  - [Performance][performance]
+ - [Versioning][versioning]
+ - [Supported platform][supported_platform]
 
 ## Learning
 
 To learn more about the concepts and internals behind etcd, read the following pages:
 
- - Why etcd
- - Concepts
- - Internals
+ - Why etcd (TODO)
+ - [Understand data model][data_model]
+ - [Understand APIs][understand_apis]
  - [Glossary][glossary]
+ - Internals (TODO)
 
 ## Upgrading and compatibility
 
@@ -44,8 +49,10 @@ To learn more about the concepts and internals behind etcd, read the following p
 ## Troubleshooting
 
 [api_ref]: dev-guide/api_reference_v3.md
+[api_grpc_gateway]: dev-guide/api_grpc_gateway.md
 [clustering]: op-guide/clustering.md
 [conf]: op-guide/configuration.md
+[data_model]: learning/data_model.md
 [demo]: demo.md
 [download_build]: dl_build.md
 [failures]: op-guide/failures.md
@@ -58,3 +65,7 @@ To learn more about the concepts and internals behind etcd, read the following p
 [security]: op-guide/security.md
 [v2_migration]: op-guide/v2-migration.md
 [container]: op-guide/container.md
+[understand_apis]: learning/api.md
+[versioning]: op-guide/versioning.md
+[supported_platform]: op-guide/supported-platform.md
+[experimental]: dev-guide/experimental_apis.md

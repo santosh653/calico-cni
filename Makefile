@@ -1,6 +1,3 @@
-# TODO sort out phoney
-.PHONY: all binary test plugin ipam ut clean update-version
-
 # TODO - use proper SRCFILES
 SRCFILES=calico.go
 # TODO - make the IP docker-machine compatible
@@ -15,20 +12,20 @@ MAKE_SURE_DIST_EXIST := $(shell mkdir -p dist)
 
 BUILD_TAGS?=
 
+.PHONY: all binary plugin ipam
 default: all
 all: binary test
 binary:  dist/calico dist/calico-ipam
 plugin: dist/calico
 ipam: dist/calico-ipam
 
+.PHONY: test
 # Run the unit tests.
+# go get github.com/onsi/ginkgo/ginkgo
 test: dist/calico dist/calico-ipam run-etcd
-	go get github.com/onsi/ginkgo/ginkgo
-	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=$(GOPATH) $(shell which ginkgo)
+	# The tests need to run as root
+	sudo ETCD_IP=127.0.0.1 PLUGIN=calico GOPATH=$(GOPATH) $(shell which ginkgo)
 
-cni_container.created: Dockerfile
-	docker build -t cni_container .
-	touch cni_container.created
 
 test-containerized: run-etcd cni_container.created build-containerized
 	docker run -ti --rm --privileged --net=host \
@@ -46,9 +43,13 @@ build-containerized: cni_container.created
 		make binary; \
 		chown -R $(shell id -u):$(shell id -u) dist'
 
+cni_container.created: Dockerfile
+	docker build -t cni_container .
+	touch cni_container.created
+
 # Run the unit tests, watching for changes.
 ut-watch: dist/calico dist/calico-ipam
-	sudo ETCD_IP=127.0.0.1 HOSTNAME=mbp PLUGIN=calico GOPATH=/home/tom/go /home/tom/go/bin/ginkgo watch
+	sudo ETCD_IP=127.0.0.1 PLUGIN=calico GOPATH=/home/tom/go /home/tom/go/bin/ginkgo watch
 
 clean:
 	-sudo rm -rf dist
@@ -145,6 +146,8 @@ dist/calico-ipam: ipam/calico-ipam.go
 		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" \
 		ipam/calico-ipam.go;
 
+
+# TODO - this needs removing
 go_test: dist/calico dist/host-local dist/calipo
 	docker run -ti --rm --privileged \
 	--hostname cnitests \
@@ -154,6 +157,7 @@ go_test: dist/calico dist/host-local dist/calipo
 	flannel_build bash -c '\
 		go test -v github.com/projectcalico/calico-cni/tests'
 
+# TODO - this needs removing
 python_test: dist/calipo dist/host-local
 	docker run -ti --rm --privileged \
 	--hostname cnitests \

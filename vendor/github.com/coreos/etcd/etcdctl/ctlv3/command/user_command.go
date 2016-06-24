@@ -23,6 +23,10 @@ import (
 	"golang.org/x/net/context"
 )
 
+var (
+	userShowDetail bool
+)
+
 // NewUserCommand returns the cobra command for "user".
 func NewUserCommand() *cobra.Command {
 	ac := &cobra.Command{
@@ -33,6 +37,7 @@ func NewUserCommand() *cobra.Command {
 	ac.AddCommand(newUserAddCommand())
 	ac.AddCommand(newUserDeleteCommand())
 	ac.AddCommand(newUserGetCommand())
+	ac.AddCommand(newUserListCommand())
 	ac.AddCommand(newUserChangePasswordCommand())
 	ac.AddCommand(newUserGrantRoleCommand())
 	ac.AddCommand(newUserRevokeRoleCommand())
@@ -65,11 +70,22 @@ func newUserDeleteCommand() *cobra.Command {
 }
 
 func newUserGetCommand() *cobra.Command {
-	// TODO(mitake): this command should also get detailed information of roles of the user
-	return &cobra.Command{
+	cmd := cobra.Command{
 		Use:   "get <user name>",
 		Short: "get detailed information of a user",
 		Run:   userGetCommandFunc,
+	}
+
+	cmd.Flags().BoolVar(&userShowDetail, "detail", false, "show permissions of roles granted to the user")
+
+	return &cmd
+}
+
+func newUserListCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "list up all users",
+		Run:   userListCommandFunc,
 	}
 }
 
@@ -80,7 +96,7 @@ func newUserChangePasswordCommand() *cobra.Command {
 		Run:   userChangePasswordCommandFunc,
 	}
 
-	cmd.Flags().BoolVar(&passwordInteractive, "interactive", true, "read password from stdin instead of interactive terminal")
+	cmd.Flags().BoolVar(&passwordInteractive, "interactive", true, "if true, read password from stdin instead of interactive terminal")
 
 	return &cmd
 }
@@ -96,7 +112,7 @@ func newUserGrantRoleCommand() *cobra.Command {
 func newUserRevokeRoleCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "revoke-role <user name> <role name>",
-		Short: "revoke a role from from a user",
+		Short: "revoke a role from a user",
 		Run:   userRevokeRoleCommandFunc,
 	}
 }
@@ -143,17 +159,47 @@ func userGetCommandFunc(cmd *cobra.Command, args []string) {
 		ExitWithError(ExitBadArgs, fmt.Errorf("user get command requires user name as its argument."))
 	}
 
-	resp, err := mustClientFromCmd(cmd).Auth.UserGet(context.TODO(), args[0])
+	name := args[0]
+	client := mustClientFromCmd(cmd)
+	resp, err := client.Auth.UserGet(context.TODO(), name)
 	if err != nil {
 		ExitWithError(ExitError, err)
 	}
 
-	fmt.Printf("User: %s\n", args[0])
-	fmt.Printf("Roles:")
-	for _, role := range resp.Roles {
-		fmt.Printf(" %s", role)
+	fmt.Printf("User: %s\n", name)
+	if !userShowDetail {
+		fmt.Printf("Roles:")
+		for _, role := range resp.Roles {
+			fmt.Printf(" %s", role)
+		}
+		fmt.Printf("\n")
+	} else {
+		for _, role := range resp.Roles {
+			fmt.Printf("\n")
+			roleResp, err := client.Auth.RoleGet(context.TODO(), role)
+			if err != nil {
+				ExitWithError(ExitError, err)
+			}
+
+			printRolePermissions(role, roleResp)
+		}
 	}
-	fmt.Printf("\n")
+}
+
+// userListCommandFunc executes the "user list" command.
+func userListCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 0 {
+		ExitWithError(ExitBadArgs, fmt.Errorf("user list command requires no arguments."))
+	}
+
+	resp, err := mustClientFromCmd(cmd).Auth.UserList(context.TODO())
+	if err != nil {
+		ExitWithError(ExitError, err)
+	}
+
+	for _, user := range resp.Users {
+		fmt.Printf("%s\n", user)
+	}
 }
 
 // userChangePasswordCommandFunc executes the "user passwd" command.

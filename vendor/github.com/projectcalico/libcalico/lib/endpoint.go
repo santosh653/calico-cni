@@ -20,7 +20,7 @@ type Endpoint struct {
 	State          string `json:"state"`
 	Name           string `json:"name"`
 	Mac            string `json:"mac"`
-	ProfileID      []string `json:"profile_ids"`
+	ProfileIDs     []string `json:"profile_ids"`
 	IPv4Nets       []string `json:"ipv4_nets"`
 	IPv6Nets       []string `json:"ipv6_nets"`
 	Labels         map[string]string `json:"labels,omitempty"`

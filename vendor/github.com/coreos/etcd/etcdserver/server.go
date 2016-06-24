@@ -58,9 +58,6 @@ import (
 )
 
 const (
-	// owner can make/remove files inside the directory
-	privateDirMode = 0700
-
 	DefaultSnapCount = 10000
 
 	StoreClusterPrefix = "/0"
@@ -246,7 +243,7 @@ func NewServer(cfg *ServerConfig) (srv *EtcdServer, err error) {
 
 	haveWAL := wal.Exist(cfg.WALDir())
 
-	if err = os.MkdirAll(cfg.SnapDir(), privateDirMode); err != nil && !os.IsExist(err) {
+	if err = fileutil.TouchDirAll(cfg.SnapDir()); err != nil {
 		plog.Fatalf("create snapshot directory error: %v", err)
 	}
 	ss := snap.New(cfg.SnapDir())
@@ -596,7 +593,15 @@ func (s *EtcdServer) run() {
 
 func (s *EtcdServer) applyAll(ep *etcdProgress, apply *apply) {
 	s.applySnapshot(ep, apply)
+	st := time.Now()
 	s.applyEntries(ep, apply)
+	d := time.Since(st)
+	entriesNum := len(apply.entries)
+	if entriesNum != 0 && d > time.Duration(entriesNum)*warnApplyDuration {
+		plog.Warningf("apply entries took too long [%v for %d entries]", d, len(apply.entries))
+		plog.Warningf("avoid queries with large range/delete range!")
+	}
+	proposalsApplied.Set(float64(ep.appliedi))
 	// wait for the raft routine to finish the disk writes before triggering a
 	// snapshot. or applied index might be greater than the last index in raft
 	// storage, since the raft routine might be slower than apply routine.
@@ -733,15 +738,6 @@ func (s *EtcdServer) applyEntries(ep *etcdProgress, apply *apply) {
 
 func (s *EtcdServer) triggerSnapshot(ep *etcdProgress) {
 	if ep.appliedi-ep.snapi <= s.snapCount {
-		return
-	}
-
-	// When sending a snapshot, etcd will pause compaction.
-	// After receives a snapshot, the slow follower needs to get all the entries right after
-	// the snapshot sent to catch up. If we do not pause compaction, the log entries right after
-	// the snapshot sent might already be compacted. It happens when the snapshot takes long time
-	// to send and save. Pausing compaction avoids triggering a snapshot sending cycle.
-	if atomic.LoadInt64(&s.inflightSnapshots) != 0 {
 		return
 	}
 
@@ -1065,7 +1061,7 @@ func (s *EtcdServer) applyEntryNormal(e *raftpb.Entry) {
 
 	// set the consistent index of current executing entry
 	s.consistIndex.setConsistentIndex(e.Index)
-	ar := s.applyV3Request(&raftReq)
+	ar := s.applyV3.Apply(&raftReq)
 	s.setAppliedIndex(e.Index)
 	if ar.err != ErrNoSpace || len(s.alarmStore.Get(pb.AlarmType_NOSPACE)) > 0 {
 		s.w.Trigger(id, ar)
@@ -1162,6 +1158,16 @@ func (s *EtcdServer) snapshot(snapi uint64, confState raftpb.ConfState) {
 			plog.Fatalf("save snapshot error: %v", err)
 		}
 		plog.Infof("saved snapshot at index %d", snap.Metadata.Index)
+
+		// When sending a snapshot, etcd will pause compaction.
+		// After receives a snapshot, the slow follower needs to get all the entries right after
+		// the snapshot sent to catch up. If we do not pause compaction, the log entries right after
+		// the snapshot sent might already be compacted. It happens when the snapshot takes long time
+		// to send and save. Pausing compaction avoids triggering a snapshot sending cycle.
+		if atomic.LoadInt64(&s.inflightSnapshots) != 0 {
+			plog.Infof("skip compaction since there is an inflight snapshot")
+			return
+		}
 
 		// keep some in memory log entries for slow followers.
 		compacti := uint64(1)
@@ -1304,8 +1310,7 @@ func (s *EtcdServer) Backend() backend.Backend {
 func (s *EtcdServer) AuthStore() auth.AuthStore { return s.authStore }
 
 func (s *EtcdServer) restoreAlarms() error {
-	s.applyV3 = newQuotaApplierV3(s, &applierV3backend{s})
-
+	s.applyV3 = s.newApplierV3()
 	as, err := alarm.NewAlarmStore(s)
 	if err != nil {
 		return err
