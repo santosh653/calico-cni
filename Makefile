@@ -27,7 +27,7 @@ test: dist/calico dist/calico-ipam run-etcd
 	sudo ETCD_IP=127.0.0.1 PLUGIN=calico GOPATH=$(GOPATH) $(shell which ginkgo)
 
 
-test-containerized: run-etcd cni_container.created build-containerized
+test-containerized: dist/host-local run-etcd cni_container.created build-containerized
 	docker run -ti --rm --privileged --net=host \
 	-e ETCD_IP=$(LOCAL_IP_ENV) \
 	-e PLUGIN=calico \
