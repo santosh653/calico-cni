@@ -9,7 +9,7 @@ dependencies:
     - echo "Nothing please"
 test:
   override:
-    - make test-containerized
+    - make build-containerized
 experimental:
   notify:
     branches:
