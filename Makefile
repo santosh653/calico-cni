@@ -139,11 +139,11 @@ static-checks:
 
 
 dist/calico: calico.go
-	go build -v --tags "$(BUILD_TAGS)" -o dist/calico -ldflags "-extldflags -static -X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
+	CGO_ENABLED=0 go build -v --tags "$(BUILD_TAGS)" -o dist/calico -ldflags "-X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
 
 dist/calico-ipam: ipam/calico-ipam.go
-		go build -o dist/calico-ipam -ldflags "-extldflags -static \
-		-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" \
+		CGO_ENABLED=0  go build -o dist/calico-ipam -ldflags \
+		"-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" \
 		ipam/calico-ipam.go;
 
 
