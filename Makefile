@@ -1,7 +1,4 @@
-# TODO - use proper SRCFILES
-SRCFILES=calico.go
-# TODO - make the IP docker-machine compatible
-#LOCAL_IP_ENV?=$(shell docker-machine ip)
+SRCFILES=$(wildcard *.go) $(wildcard utils/*.go) $(wildcard test_utils/*.go)
 LOCAL_IP_ENV?=$(shell ip route get 8.8.8.8 | head -1 | cut -d' ' -f8)
 
 K8S_VERSION=1.2.4
@@ -10,6 +7,7 @@ CALICO_NODE_VERSION=0.19.0
 # Ensure that the dist directory is always created
 MAKE_SURE_DIST_EXIST := $(shell mkdir -p dist)
 
+# Build tags to build. Currently default to not include kubernetes
 BUILD_TAGS?=
 
 .PHONY: all binary plugin ipam
@@ -21,11 +19,9 @@ ipam: dist/calico-ipam
 
 .PHONY: test
 # Run the unit tests.
-# go get github.com/onsi/ginkgo/ginkgo
 test: dist/calico dist/calico-ipam run-etcd
 	# The tests need to run as root
 	sudo ETCD_IP=127.0.0.1 PLUGIN=calico GOPATH=$(GOPATH) $(shell which ginkgo)
-
 
 test-containerized: dist/host-local run-etcd cni_container.created build-containerized
 	docker run -ti --rm --privileged --net=host \
@@ -48,13 +44,13 @@ cni_container.created: Dockerfile
 	touch cni_container.created
 
 # Run the unit tests, watching for changes.
-ut-watch: dist/calico dist/calico-ipam
-	sudo ETCD_IP=127.0.0.1 PLUGIN=calico GOPATH=/home/tom/go /home/tom/go/bin/ginkgo watch
+test-watch: dist/calico dist/calico-ipam
+	# The tests need to run as root
+	sudo ETCD_IP=127.0.0.1 PLUGIN=calico GOPATH=$(GOPATH) $(shell which ginkgo) watch
 
 clean:
 	-sudo rm -rf dist
 
-## Run etcd in a container.
 run-etcd:
 	@-docker rm -f calico-etcd
 	docker run --detach \
@@ -63,7 +59,7 @@ run-etcd:
 	--advertise-client-urls "http://$(LOCAL_IP_ENV):2379,http://127.0.0.1:2379,http://$(LOCAL_IP_ENV):4001,http://127.0.0.1:4001" \
 	--listen-client-urls "http://0.0.0.0:2379,http://0.0.0.0:4001"
 
-# TODO - sort out deps
+# TODO - k8s - sort out deps
 run-kubernetes-master: stop-kubernetes-master run-etcd  # binary dist/calicoctl
 	echo Get kubectl from http://storage.googleapis.com/kubernetes-release/release/v$(K8S_VERSION)/bin/linux/amd64/kubectl
 	mkdir -p net.d
@@ -114,58 +110,35 @@ dist/calicoctl:
 	curl -o dist/calicoctl -L https://github.com/projectcalico/calico-containers/releases/download/v$(CALICO_NODE_VERSION)/calicoctl
 	chmod +x dist/calicoctl
 
+vendor-up:
+	glide up -strip-vcs -strip-vendor --update-vendored --all-dependencies
+
 update-tools:
 	go get -u github.com/Masterminds/glide
 	go get -u github.com/kisielk/errcheck
 	go get -u golang.org/x/tools/cmd/goimports
 	go get -u github.com/golang/lint/golint
 
-vendor-up:
-	glide up -strip-vcs -strip-vendor --update-vendored --all-dependencies
-
 static-checks:
 	# Format the code and clean up imports
-	goimports -w *.go utils/*.go ipam/*.go  test_utils/*.go
+	-goimports -w *.go utils/*.go ipam/*.go  test_utils/*.go
 
 	# Check for coding mistake and missing error handling
-	go vet -x $(glide nv)
-	errcheck . ./ipam/... ./utils/...
+	-go vet -x $(glide nv)
+	-errcheck . ./ipam/... ./utils/...
 
 	# Check code style
-	golint calico.go
-	golint utils
-	golint ipam
+	-golint calico.go
+	-golint utils
+	-golint ipam
 
-
-
-dist/calico: calico.go
-	CGO_ENABLED=0 go build -v --tags "$(BUILD_TAGS)" -o dist/calico -ldflags "-X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
+dist/calico: $(SRCFILES)
+	CGO_ENABLED=0 go build -v --tags "$(BUILD_TAGS)" -o dist/calico \
+	-ldflags -X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
 
 dist/calico-ipam: ipam/calico-ipam.go
-		CGO_ENABLED=0  go build -o dist/calico-ipam -ldflags \
-		"-X github.com/projectcalico/calico-cni/version.Version=$(shell git describe --tags --dirty)" \
-		ipam/calico-ipam.go;
-
-
-# TODO - this needs removing
-go_test: dist/calico dist/host-local dist/calipo
-	docker run -ti --rm --privileged \
-	--hostname cnitests \
-	-e ETCD_IP=$(LOCAL_IP_ENV) \
-	-e PLUGIN=calico \
-	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
-	flannel_build bash -c '\
-		go test -v github.com/projectcalico/calico-cni/tests'
-
-# TODO - this needs removing
-python_test: dist/calipo dist/host-local
-	docker run -ti --rm --privileged \
-	--hostname cnitests \
-	-e ETCD_IP=$(LOCAL_IP_ENV) \
-	-e PLUGIN=calipo \
-	-v ${PWD}:/go/src/github.com/projectcalico/calico-cni:ro \
-	flannel_build bash -c '\
-		go test -v github.com/projectcalico/calico-cni/tests'
+	CGO_ENABLED=0 go build -o dist/calico-ipam -ldflags \
+	-ldflags -X main.VERSION=$(shell git describe --tags --dirty)" ipam/calico-ipam.go;
 
 dist/host-local:
 	mkdir -p dist

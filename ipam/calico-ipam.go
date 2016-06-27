@@ -97,6 +97,3 @@ func cmdDel(args *skel.CmdArgs) error {
 // k8s vs non-k8s
 // ipv4 vs ipv6 in network config
 // IP in the CNI args
-
-
-
