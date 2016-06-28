@@ -9,7 +9,7 @@ import:
   - pkg/types
 - package: github.com/projectcalico/libcalico
   version: go
-  repo: git@github.com:tomdee/libcalico.git
+  repo: git@github.com:projectcalico/libcalico.git
   vcs: git
   subpackages:
   - lib

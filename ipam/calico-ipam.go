@@ -16,8 +16,13 @@ func main() {
 
 // IPAMConfig represents the IP related network configuration.
 type IPAMConfig struct {
-	Name string
-	Type string    `json:"type"`
+	Name          string
+	Type          string `json:"type"`
+	EtcdAuthority string `json:"etcd_authority"`
+	EtcdEndpoints string `json:"etcd_endpoints"`
+	AssignIpv4    bool   `json:"assign_ipv4"` // TODO make sure this defaults to true
+	AssignIpv6    bool   `json:"assign_ipv6"`
+
 	Args *IPAMArgs `json:"-"`
 }
 
@@ -56,7 +61,7 @@ func LoadIPAMConfig(bytes []byte, args string) (*IPAMConfig, error) {
 }
 
 func cmdAdd(args *skel.CmdArgs) error {
-	_, err := LoadIPAMConfig(args.StdinData, args.Args)
+	conf, err := LoadIPAMConfig(args.StdinData, args.Args)
 	if err != nil {
 		return err
 	}
@@ -66,34 +71,47 @@ func cmdAdd(args *skel.CmdArgs) error {
 		return err
 	}
 
-	//TODO - does this code need to fetch the pools or should ipamClient do it automatically.
-	_, pool, _ := net.ParseCIDR("192.168.0.0/16")
+	// Default to assigning an IPv4 address
+	num4 := 1
+	if !conf.AssignIpv4 {
+		num4 = 0
+	}
+
+	// Default to NOT assigning an IPv6 address
+	num6 := 0
+	if conf.AssignIpv6 {
+		num6 = 1
+	}
 
 	// TODO - Use the workloadID as the handle (i.e. need to know about k8s)
-	addresses, _, _ := ipamClient.AutoAssign(1, 0, "", map[string]string{}, nil, pool, nil)
+	// TODO - plumb through hostname
+	// TODO - plumb through etcd info
+	assignArgs := ipam.AutoAssignArgs{Num4: num4, Num6: num6, HandleID: args.ContainerID}
+	assignedV4, assignedV6, err := ipamClient.AutoAssign(assignArgs)
 
-	ipNetwork := net.IPNet{IP: addresses[0], Mask: net.CIDRMask(32, 32)}
+	r := &types.Result{}
 
-	r := &types.Result{
-		IP4: &types.IPConfig{IP: ipNetwork},
+	if conf.AssignIpv4 {
+		ipV4Network := net.IPNet{IP: assignedV4[0], Mask: net.CIDRMask(32, 32)}
+		r.IP4 = &types.IPConfig{IP: ipV4Network}
 	}
+
+	if conf.AssignIpv6 {
+		ipV6Network := net.IPNet{IP: assignedV6[0], Mask: net.CIDRMask(128, 128)}
+		r.IP6 = &types.IPConfig{IP: ipV6Network}
+	}
+
 	return r.Print()
 }
 
 func cmdDel(args *skel.CmdArgs) error {
-	_, err := LoadIPAMConfig(args.StdinData, args.Args)
+	// TODO - Use the workloadID as the handle (i.e. need to know about k8s)
+	// Release by handle - which is workloadID.
+	ipamClient, err := ipam.NewIPAMClient()
 	if err != nil {
 		return err
 	}
-
-	//TODO  - need to release the address - but don't have an API yet
-	// Release by handle - which is worloadID.
+	ipamClient.ReleaseByHandle(args.ContainerID)
 
 	return nil
 }
-
-//TODO: Add ability to control IPv4 vs IPv6 assignment
-// TODO - Tests - all have an add and delete
-// k8s vs non-k8s
-// ipv4 vs ipv6 in network config
-// IP in the CNI args
