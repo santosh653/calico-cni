@@ -20,8 +20,8 @@ type IPAMConfig struct {
 	Type          string `json:"type"`
 	EtcdAuthority string `json:"etcd_authority"`
 	EtcdEndpoints string `json:"etcd_endpoints"`
-	AssignIpv4    bool   `json:"assign_ipv4"` // TODO make sure this defaults to true
-	AssignIpv6    bool   `json:"assign_ipv6"`
+	AssignIpv4    *bool  `json:"assign_ipv4"` // TODO make sure this defaults to true
+	AssignIpv6    *bool  `json:"assign_ipv6"`
 
 	Args *IPAMArgs `json:"-"`
 }
@@ -73,30 +73,35 @@ func cmdAdd(args *skel.CmdArgs) error {
 
 	// Default to assigning an IPv4 address
 	num4 := 1
-	if !conf.AssignIpv4 {
+	if conf.AssignIpv4 != nil && *conf.AssignIpv4 == false {
 		num4 = 0
 	}
 
 	// Default to NOT assigning an IPv6 address
 	num6 := 0
-	if conf.AssignIpv6 {
+	if conf.AssignIpv6 != nil && *conf.AssignIpv6 == true {
 		num6 = 1
 	}
 
+	// TODO - Read the IP from CNI_ARGS and use it.
 	// TODO - Use the workloadID as the handle (i.e. need to know about k8s)
 	// TODO - plumb through hostname
-	// TODO - plumb through etcd info
-	assignArgs := ipam.AutoAssignArgs{Num4: num4, Num6: num6, HandleID: args.ContainerID}
+	// TODO - plumb through etcd auth
+	// TODO - confirm with Casey if HandleID really needs to be a pointer to a string.
+	assignArgs := ipam.AutoAssignArgs{Num4: num4, Num6: num6, HandleID: &args.ContainerID}
 	assignedV4, assignedV6, err := ipamClient.AutoAssign(assignArgs)
+	if err != nil {
+		return err
+	}
 
 	r := &types.Result{}
 
-	if conf.AssignIpv4 {
+	if conf.AssignIpv4 == nil || (conf.AssignIpv4 != nil && *conf.AssignIpv4 == true) {
 		ipV4Network := net.IPNet{IP: assignedV4[0], Mask: net.CIDRMask(32, 32)}
 		r.IP4 = &types.IPConfig{IP: ipV4Network}
 	}
 
-	if conf.AssignIpv6 {
+	if conf.AssignIpv6 != nil && *conf.AssignIpv6 == true {
 		ipV6Network := net.IPNet{IP: assignedV6[0], Mask: net.CIDRMask(128, 128)}
 		r.IP6 = &types.IPConfig{IP: ipV6Network}
 	}

@@ -134,11 +134,11 @@ static-checks:
 
 dist/calico: $(SRCFILES)
 	CGO_ENABLED=0 go build -v --tags "$(BUILD_TAGS)" -o dist/calico \
-	-ldflags -X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
+	-ldflags "-X main.VERSION=$(shell git describe --tags --dirty)" calico.go;
 
 dist/calico-ipam: ipam/calico-ipam.go
-	CGO_ENABLED=0 go build -o dist/calico-ipam -ldflags \
-	-ldflags -X main.VERSION=$(shell git describe --tags --dirty)" ipam/calico-ipam.go;
+	CGO_ENABLED=0 go build -o dist/calico-ipam  \
+	-ldflags "-X main.VERSION=$(shell git describe --tags --dirty)" ipam/calico-ipam.go;
 
 dist/host-local:
 	mkdir -p dist
