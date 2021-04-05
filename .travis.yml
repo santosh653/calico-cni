@@ -1,0 +1,13 @@
+arch: 
+  - amd64
+  - ppc64le
+language: python
+os: linux
+dist: xenial
+python:
+  - 2.7
+  - 3.7
+  - 3.8
+
+script:
+  - make
